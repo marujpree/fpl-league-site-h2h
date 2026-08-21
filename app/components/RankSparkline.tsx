@@ -1,4 +1,4 @@
-import type { RankHistoryPoint } from "./mock-data";
+import type { RankHistoryPoint } from "@/lib/fpl-types";
 
 type RankSparklineProps = {
   history: RankHistoryPoint[];

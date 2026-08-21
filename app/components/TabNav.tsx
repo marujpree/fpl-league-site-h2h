@@ -7,12 +7,11 @@ const TABS = [
   { href: "/", label: "Standings" },
   { href: "/gameweek", label: "This Gameweek" },
   { href: "/fixtures", label: "Fixtures" },
-  { href: "/manager/reyes-fc", label: "Manager Profile" },
+  { href: "/stats", label: "Stats" },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
-  if (href.startsWith("/manager")) return pathname.startsWith("/manager");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -29,7 +28,7 @@ export default function TabNav() {
               key={tab.href}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium transition-colors sm:px-4 ${
+              className={`relative whitespace-nowrap px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:py-3 sm:text-sm ${
                 active ? "text-foreground" : "text-muted hover:text-foreground"
               }`}
             >

@@ -1,33 +1,35 @@
 @import "tailwindcss";
 
 /*
-  Dark-only PL-style palette. This app has no light mode — it mirrors the
-  official Fantasy Draft dashboard (deep purple background, purple->cyan
-  gradient banner, bold white scorelines) at all times, regardless of the
-  viewer's OS theme preference.
+  Light, clean palette matching the official Fantasy Draft dashboard's actual
+  look (white background, purple/cyan gradient reserved for the header
+  banner only, bold dark scorelines) rather than an all-dark "AI generated"
+  theme. This app has no dark mode toggle — it's light-only by design.
 */
 :root {
-  --background: #0d0221;
-  --background-elevated: #170a35;
-  --foreground: #f5f3ff;
-  --muted: #a89bd1;
+  --background: #ffffff;
+  --background-elevated: #f4f2f9;
+  --foreground: #1a1025;
+  --muted: #6b7280;
 
-  --card: #1a0e3d;
-  --card-border: #33235f;
+  --card: #ffffff;
+  --card-border: #e3e0ec;
 
-  --gradient-start: #6d1cd1;
-  --gradient-mid: #7b3ff2;
-  --gradient-end: #00d4ff;
+  /* Official-esque Premier League purple -> brand cyan/green, used only for
+     the header banner and the lion mark -- not the page background. */
+  --gradient-start: #38003c;
+  --gradient-mid: #6d1cd1;
+  --gradient-end: #04f5ff;
 
-  --win: #22c55e;
-  --loss: #ef4444;
-  --live: #00d4ff;
+  --win: #16a34a;
+  --loss: #dc2626;
+  --live: #0ea5e9;
 
-  /* Magenta/pink accent reserved for interactive elements (links, active
-     nav tab, focus states) -- distinct from the win/loss/live states above
-     and from the per-manager identity palette in components/manager-color.ts. */
-  --accent: #ec4899;
-  --accent-strong: #f472b6;
+  /* Purple accent for interactive elements (links, active nav tab, focus
+     states) -- matches the lion mark, distinct from win/loss/live and from
+     the per-manager identity palette in components/manager-color.ts. */
+  --accent: #6d1cd1;
+  --accent-strong: #38003c;
 }
 
 @theme inline {
@@ -59,6 +61,15 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+/* Slightly "zoomed out" on phones -- Tailwind's spacing/text utilities are
+   rem-based, so shrinking the root font-size proportionally tightens every
+   padding/gap/text-size at once instead of hand-tuning each component. */
+@media (max-width: 639px) {
+  html {
+    font-size: 14px;
+  }
+}
+
 /* Bold purple->cyan banner, used by Nav and other top-of-page surfaces. */
 .pl-gradient {
   background: linear-gradient(
@@ -87,10 +98,10 @@ body {
 
 @keyframes pl-glow-in {
   from {
-    text-shadow: 0 0 0 rgba(34, 197, 94, 0);
+    text-shadow: 0 0 0 rgba(22, 163, 74, 0);
   }
   to {
-    text-shadow: 0 0 12px rgba(34, 197, 94, 0.65);
+    text-shadow: 0 0 10px rgba(22, 163, 74, 0.55);
   }
 }
 

@@ -1,24 +1,31 @@
-import MatchupCard from "@/components/MatchupCard";
-import { CURRENT_GAMEWEEK, CURRENT_GW_MATCHUPS } from "@/components/mock-data";
+import LiveGameweekView from "@/components/LiveGameweekView";
+import { getCurrentGameweek, getCurrentGameweekMatchups } from "@/lib/data";
 
-// NOTE: mock data -- see components/mock-data.ts. GW6 is fabricated as the
-// "current, in-progress" gameweek so live/provisional UI states are visible.
+export default async function GameweekPage() {
+  const [matchups, gameweek] = await Promise.all([getCurrentGameweekMatchups(), getCurrentGameweek()]);
 
-export default function GameweekPage() {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3 sm:gap-5">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+        <h1 className="text-xl font-extrabold tracking-tight text-foreground sm:text-3xl">
           This Gameweek
         </h1>
-        <p className="text-sm text-muted">Gameweek {CURRENT_GAMEWEEK} matchups</p>
+        <p className="text-sm text-muted">
+          {gameweek ? `Gameweek ${gameweek.id} matchups` : "Season hasn't started yet"}
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {CURRENT_GW_MATCHUPS.map((matchup) => (
-          <MatchupCard key={`${matchup.manager1.id}-${matchup.manager2.id}`} matchup={matchup} />
-        ))}
-      </div>
+      {matchups.length === 0 ? (
+        <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
+          No matchups yet — check back once the season kicks off.
+        </p>
+      ) : (
+        <LiveGameweekView
+          matchups={matchups}
+          gameweekId={gameweek?.id ?? null}
+          gameweekFinished={gameweek?.is_finished ?? false}
+        />
+      )}
     </div>
   );
 }

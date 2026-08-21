@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { getMockSquad, type Manager, type MatchupSummary, type MockPlayerLine } from "./mock-data";
+import HeadToHeadSummary from "./HeadToHeadSummary";
+import type { MatchupSummary } from "@/lib/fpl-types";
 
 type MatchupCardProps = {
   matchup: MatchupSummary;
@@ -10,14 +11,15 @@ type MatchupCardProps = {
 
 export default function MatchupCard({ matchup }: MatchupCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const { manager1, manager2, score1, score2, isLive, isProvisional } = matchup;
+  const { manager1, manager2, score1, score2, isLive, isProvisional, headToHead } = matchup;
+  const played = score1 !== undefined && score2 !== undefined;
 
-  const manager1Winning = isLive && score1 > score2;
-  const manager2Winning = isLive && score2 > score1;
+  const manager1Winning = played && isLive && score1! > score2!;
+  const manager2Winning = played && isLive && score2! > score1!;
 
   return (
     <div className="overflow-hidden rounded-xl border border-card-border bg-card">
-      <div className="flex items-center justify-between gap-2 px-4 pt-3">
+      <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4 sm:pt-3">
         <span className="text-xs font-medium uppercase tracking-wide text-muted">
           Gameweek {matchup.gameweek}
         </span>
@@ -36,19 +38,23 @@ export default function MatchupCard({ matchup }: MatchupCardProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-4">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
         <ScoreSide teamName={manager1.teamName} ownerName={manager1.displayName} color={manager1.accentColor} winning={manager1Winning} align="right" />
 
-        <div className="flex items-center gap-2 px-1 text-2xl font-extrabold tabular-nums sm:text-3xl">
-          <span className={manager1Winning ? "pl-glow-win" : "text-foreground"}>{score1}</span>
-          <span className="text-muted">&ndash;</span>
-          <span className={manager2Winning ? "pl-glow-win" : "text-foreground"}>{score2}</span>
-        </div>
+        {played ? (
+          <div className="flex items-center gap-1.5 px-1 text-xl font-extrabold tabular-nums sm:gap-2 sm:text-3xl">
+            <span className={manager1Winning ? "pl-glow-win" : "text-foreground"}>{score1}</span>
+            <span className="text-muted">&ndash;</span>
+            <span className={manager2Winning ? "pl-glow-win" : "text-foreground"}>{score2}</span>
+          </div>
+        ) : (
+          <div className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">vs</div>
+        )}
 
         <ScoreSide teamName={manager2.teamName} ownerName={manager2.displayName} color={manager2.accentColor} winning={manager2Winning} align="left" />
       </div>
 
-      <div className="flex justify-center gap-4 px-4 pb-1 text-xs">
+      <div className="flex justify-center gap-4 px-3 pb-1 text-xs sm:px-4">
         <Link href={`/manager/${manager1.id}`} className="text-muted hover:text-accent-strong">
           View {manager1.teamName}
         </Link>
@@ -63,7 +69,7 @@ export default function MatchupCard({ matchup }: MatchupCardProps) {
         aria-expanded={expanded}
         className="flex w-full items-center justify-center gap-1.5 border-t border-card-border py-2.5 text-xs font-semibold text-muted transition-colors hover:bg-background-elevated hover:text-foreground"
       >
-        {expanded ? "Hide" : "Show"} player breakdown
+        {expanded ? "Hide" : "Show"} head-to-head
         <svg
           aria-hidden
           viewBox="0 0 12 8"
@@ -74,10 +80,9 @@ export default function MatchupCard({ matchup }: MatchupCardProps) {
         </svg>
       </button>
 
-      {expanded && (
-        <div className="grid grid-cols-2 gap-px bg-card-border">
-          <SquadTable manager={manager1} total={score1} />
-          <SquadTable manager={manager2} total={score2} />
+      {expanded && headToHead && (
+        <div className="border-t border-card-border px-4 py-3">
+          <HeadToHeadSummary manager1={manager1} manager2={manager2} record={headToHead} />
         </div>
       )}
     </div>
@@ -100,7 +105,7 @@ function ScoreSide({
   return (
     <div
       className={`flex min-w-0 flex-col ${align === "right" ? "items-end text-right" : "items-start text-left"}`}
-      style={winning ? { filter: "drop-shadow(0 0 8px rgba(34,197,94,0.45))" } : undefined}
+      style={winning ? { filter: "drop-shadow(0 0 8px rgba(22,163,74,0.4))" } : undefined}
     >
       <span
         className="mb-1 h-1 w-8 rounded-full"
@@ -113,28 +118,3 @@ function ScoreSide({
   );
 }
 
-function SquadTable({ manager, total }: { manager: Manager; total: number }) {
-  const players: MockPlayerLine[] = getMockSquad(manager, total);
-
-  return (
-    <div className="bg-card p-3">
-      <div className="mb-2 flex items-center gap-2">
-        <span aria-hidden className="h-2 w-2 rounded-full" style={{ backgroundColor: manager.accentColor }} />
-        <span className="truncate text-xs font-semibold text-foreground">{manager.teamName}</span>
-      </div>
-      <ul className="flex flex-col gap-1">
-        {players.map((player) => (
-          <li key={player.name} className="flex items-center justify-between text-xs">
-            <span className="text-muted">
-              <span className="mr-1.5 inline-block w-8 text-[10px] font-semibold uppercase text-foreground/50">
-                {player.position}
-              </span>
-              {player.name}
-            </span>
-            <span className="font-semibold tabular-nums text-foreground">{player.points}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}

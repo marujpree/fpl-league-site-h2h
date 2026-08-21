@@ -1,4 +1,4 @@
-import type { Manager } from "./mock-data";
+import type { Manager } from "@/lib/fpl-types";
 
 type ManagerBadgeProps = {
   manager: Manager;
@@ -30,7 +30,12 @@ export default function ManagerBadge({
         />
       )}
       <span className="flex min-w-0 flex-col leading-tight">
-        <span className="truncate font-semibold text-foreground">{manager.teamName}</span>
+        <span className="flex items-baseline gap-1.5 truncate">
+          <span className="truncate font-semibold text-foreground">{manager.teamName}</span>
+          <span className="shrink-0 text-[11px] font-semibold uppercase text-muted">
+            {manager.initials}
+          </span>
+        </span>
         {subtitle !== undefined ? (
           <span className="truncate text-xs text-muted">{subtitle}</span>
         ) : (

@@ -69,6 +69,7 @@ export interface FplElementType {
 
 export interface FplElement {
   id: number;
+  code: number; // used to build official photo URLs, see SquadPlayer.photoCode
   web_name: string;
   first_name: string;
   second_name: string;
@@ -128,6 +129,18 @@ export interface FplEventLive {
   elements: Record<string, { stats: FplLiveElementStats }>;
 }
 
+// ---- /league/{id}/element-status ----
+// Draft leagues assign players permanently at draft time (unlike Classic's
+// per-gameweek picks) -- this is the source of truth for "who owns whom"
+// and is available as soon as the draft finishes, independent of whether
+// the season has started.
+
+export interface FplElementStatus {
+  element: number; // matches FplElement.id from bootstrap-static
+  owner: number | null; // matches FplLeagueEntry.entry_id, or null if undrafted/free agent
+  status: string;
+}
+
 // ---- /entry/{entry_id}/event/{gw} ----
 // Returns the literal string "No pick history" (not JSON) before a
 // manager's squad has ever been set for that gameweek — callers must
@@ -135,6 +148,11 @@ export interface FplEventLive {
 
 export interface FplEntryEventPick {
   element: number;
+  /** Squad slot, 1-15. 1-11 = starting XI, 12-15 = bench. NOTE: unlike
+   * Classic FPL, Draft does NOT zero out `multiplier` for benched players
+   * (it's 1 for everyone pre-captain) -- `position`, not `multiplier`, is
+   * the actual starting/bench signal here. */
+  position: number;
   multiplier: number;
   is_captain: boolean;
   is_vice_captain: boolean;
@@ -154,6 +172,7 @@ export interface Manager {
   id: string; // slug, e.g. "reyes-fc" — stable across mock + real data
   displayName: string;
   teamName: string;
+  initials: string; // FPL league_entries.short_name, e.g. "SR"
   accentColor: string;
 }
 
@@ -172,8 +191,74 @@ export interface MatchupSummary {
   gameweek: number;
   manager1: Manager;
   manager2: Manager;
-  score1: number;
-  score2: number;
+  score1?: number; // undefined until the manager's picks lock for this GW
+  score2?: number;
   isLive: boolean;
-  provisional?: boolean;
+  isProvisional: boolean; // bonus points can still shift for ~1hr post-match (PRD §5)
+  headToHead?: PairRecord;
 }
+
+export interface FixtureEntry {
+  gameweek: number;
+  manager1: Manager;
+  manager2: Manager;
+  score1?: number;
+  score2?: number;
+  played: boolean;
+  isLive?: boolean;
+  isProvisional?: boolean;
+  headToHead?: PairRecord;
+}
+
+export interface SquadPlayer {
+  id: number;
+  name: string; // FPL web_name, e.g. "Salah"
+  position: "GKP" | "DEF" | "MID" | "FWD";
+  club: string; // club short_name, e.g. "LIV"
+  seasonPoints: number;
+  status: string; // "a" available, "i" injured, "d" doubtful, "s" suspended, "u" unavailable
+  /** Builds a photo URL: `https://resources.premierleague.com/premierleague/photos/players/110x140/p${photoCode}.png` */
+  photoCode: number;
+  /** Builds a badge URL: `https://resources.premierleague.com/premierleague/badges/70/t${clubCode}.png` */
+  clubCode: number;
+}
+
+export interface LineupPlayer extends SquadPlayer {
+  isCaptain: boolean;
+  isViceCaptain: boolean;
+}
+
+export interface GameweekLineup {
+  starting: LineupPlayer[];
+  bench: LineupPlayer[];
+}
+
+export interface RankHistoryPoint {
+  gameweek: number;
+  rank: number;
+}
+
+export interface FormResult {
+  gameweek: number;
+  result: "W" | "D" | "L";
+  pointsFor: number;
+  pointsAgainst: number;
+  opponent: Manager;
+}
+
+export interface HeadToHeadRecord {
+  wins: number;
+  draws: number;
+  losses: number;
+}
+
+/** Season-to-date record between two specific managers, from a neutral
+ * (not either manager's) point of view -- used on matchup/fixture rows. */
+export interface PairRecord {
+  manager1Wins: number;
+  draws: number;
+  manager2Wins: number;
+  meetings: number;
+}
+
+export const TOTAL_GAMEWEEKS = 38;

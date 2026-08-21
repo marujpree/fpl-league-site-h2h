@@ -1,0 +1,477 @@
+// Real data layer — reads the live Supabase tables (seeded from the actual
+// FPL Draft league 49277) instead of components/mock-data.ts's fabricated
+// scores. Same domain-type contract (lib/fpl-types.ts) so page code stays
+// simple; the difference is everything here is `async` and most numbers
+// come back as zero/null/empty right now because the real 2026/27 season
+// hasn't started yet (GW1 deadline 2026-08-21T17:30:00Z) — that's expected,
+// not a bug.
+
+import { getBrowserClient } from "./supabase";
+import { getManagerColor } from "@/components/manager-color";
+import { getBootstrap, getElementStatus, getEntryPicks, LEAGUE_ID } from "./fpl";
+import type {
+  FixtureEntry,
+  FormResult,
+  FplEntryEventPick,
+  GameweekLineup,
+  HeadToHeadRecord,
+  LineupPlayer,
+  Manager,
+  MatchupSummary,
+  PairRecord,
+  RankHistoryPoint,
+  SquadPlayer,
+  StandingsRow,
+} from "./fpl-types";
+import type { H2HMatchRow, ManagerRow, GameweekRow } from "./supabase";
+import {
+  getManagers as fetchManagerRows,
+  getFullSchedule,
+  getCurrentGameweek as fetchCurrentGameweekRow,
+} from "./supabase";
+
+export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, PairRecord, RankHistoryPoint, SquadPlayer, StandingsRow };
+export { TOTAL_GAMEWEEKS } from "./fpl-types";
+
+function toManager(row: ManagerRow): Manager {
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    teamName: row.team_name,
+    initials: row.initials,
+    accentColor: getManagerColor(row.id),
+  };
+}
+
+/** Cached per-request: Next.js dedupes identical `fetch`-free calls per
+ * request only via `fetch`, so for direct Supabase calls we just accept
+ * a couple of small round-trips per page — 10 managers / 190 matches is
+ * trivial and this is called at most a few times per page render. */
+async function loadManagers(): Promise<Manager[]> {
+  const client = getBrowserClient();
+  const rows = await fetchManagerRows(client);
+  return rows.map(toManager);
+}
+
+async function loadAllMatches(): Promise<H2HMatchRow[]> {
+  const client = getBrowserClient();
+  return getFullSchedule(client);
+}
+
+export async function getManagers(): Promise<Manager[]> {
+  return loadManagers();
+}
+
+export async function getManagerById(id: string): Promise<Manager | undefined> {
+  const managers = await loadManagers();
+  return managers.find((m) => m.id === id);
+}
+
+export async function getCurrentGameweek(): Promise<GameweekRow | null> {
+  const client = getBrowserClient();
+  return fetchCurrentGameweekRow(client);
+}
+
+// ---------------------------------------------------------------------------
+// Standings — computed live from h2h_matches rather than the
+// standings_snapshot cache table, so it's always correct even before
+// anything has populated that cache.
+// ---------------------------------------------------------------------------
+
+type Tally = { played: number; wins: number; draws: number; losses: number; points: number; totalScored: number };
+
+function tallyFromMatches(matches: H2HMatchRow[], managerIds: string[]): Map<string, Tally> {
+  const table = new Map<string, Tally>();
+  for (const id of managerIds) {
+    table.set(id, { played: 0, wins: 0, draws: 0, losses: 0, points: 0, totalScored: 0 });
+  }
+  for (const match of matches) {
+    if (match.score_1 === null || match.score_2 === null) continue; // not played yet
+    const row1 = table.get(match.manager_1_id);
+    const row2 = table.get(match.manager_2_id);
+    if (!row1 || !row2) continue;
+    row1.played += 1;
+    row2.played += 1;
+    row1.totalScored += match.score_1;
+    row2.totalScored += match.score_2;
+    if (match.score_1 > match.score_2) {
+      row1.wins += 1;
+      row1.points += 3;
+      row2.losses += 1;
+    } else if (match.score_1 < match.score_2) {
+      row2.wins += 1;
+      row2.points += 3;
+      row1.losses += 1;
+    } else {
+      row1.draws += 1;
+      row2.draws += 1;
+      row1.points += 1;
+      row2.points += 1;
+    }
+  }
+  return table;
+}
+
+/** Season-to-date record between two managers, computed from the full
+ * match list (only counting matches with a final score) — no extra query. */
+function pairRecord(matches: H2HMatchRow[], id1: string, id2: string): PairRecord {
+  const record: PairRecord = { manager1Wins: 0, draws: 0, manager2Wins: 0, meetings: 0 };
+  for (const m of matches) {
+    if (m.score_1 === null || m.score_2 === null) continue;
+    const isPair =
+      (m.manager_1_id === id1 && m.manager_2_id === id2) ||
+      (m.manager_1_id === id2 && m.manager_2_id === id1);
+    if (!isPair) continue;
+    record.meetings += 1;
+    const score1 = m.manager_1_id === id1 ? m.score_1 : m.score_2;
+    const score2 = m.manager_1_id === id1 ? m.score_2 : m.score_1;
+    if (score1 > score2) record.manager1Wins += 1;
+    else if (score2 > score1) record.manager2Wins += 1;
+    else record.draws += 1;
+  }
+  return record;
+}
+
+export async function getStandings(): Promise<StandingsRow[]> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  const table = tallyFromMatches(matches, managers.map((m) => m.id));
+
+  const rows = managers.map((manager) => {
+    const t = table.get(manager.id)!;
+    return { manager, rank: 0, played: t.played, wins: t.wins, draws: t.draws, losses: t.losses, points: t.points, totalScored: t.totalScored };
+  });
+
+  // Pre-season (everyone 0-0-0-0): keep a stable alphabetical order rather
+  // than an arbitrary one. Once games are played, sort by points/scored.
+  rows.sort((a, b) => b.points - a.points || b.totalScored - a.totalScored || a.manager.teamName.localeCompare(b.manager.teamName));
+  rows.forEach((row, i) => (row.rank = i + 1));
+
+  return rows.map(({ manager, rank, played, wins, draws, losses, points }) => ({
+    manager,
+    rank,
+    played,
+    wins,
+    draws,
+    losses,
+    points,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// This Gameweek
+// ---------------------------------------------------------------------------
+
+export async function getCurrentGameweekMatchups(): Promise<MatchupSummary[]> {
+  const [managers, gameweek, matches] = await Promise.all([
+    loadManagers(),
+    getCurrentGameweek(),
+    loadAllMatches(),
+  ]);
+  if (!gameweek) return [];
+
+  const byId = new Map(managers.map((m) => [m.id, m]));
+  return matches
+    .filter((m) => m.gameweek_id === gameweek.id)
+    .map((m) => {
+      const played = m.score_1 !== null && m.score_2 !== null;
+      return {
+        gameweek: gameweek.id,
+        manager1: byId.get(m.manager_1_id)!,
+        manager2: byId.get(m.manager_2_id)!,
+        score1: m.score_1 ?? undefined,
+        score2: m.score_2 ?? undefined,
+        isLive: played && !gameweek.is_finished,
+        isProvisional: played && !gameweek.is_finished,
+        headToHead: pairRecord(matches, m.manager_1_id, m.manager_2_id),
+      };
+    })
+    .filter((m) => m.manager1 && m.manager2);
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures (full season)
+// ---------------------------------------------------------------------------
+
+export async function getFixtures(): Promise<FixtureEntry[]> {
+  const [managers, matches, gameweek] = await Promise.all([loadManagers(), loadAllMatches(), getCurrentGameweek()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+
+  return matches
+    .map((m) => {
+      const played = m.score_1 !== null && m.score_2 !== null;
+      const isCurrentGw = gameweek !== null && m.gameweek_id === gameweek.id;
+      return {
+        gameweek: m.gameweek_id,
+        manager1: byId.get(m.manager_1_id)!,
+        manager2: byId.get(m.manager_2_id)!,
+        score1: m.score_1 ?? undefined,
+        score2: m.score_2 ?? undefined,
+        played,
+        isLive: played && isCurrentGw && !gameweek!.is_finished,
+        isProvisional: played && isCurrentGw && !gameweek!.is_finished,
+        headToHead: pairRecord(matches, m.manager_1_id, m.manager_2_id),
+      };
+    })
+    .filter((f) => f.manager1 && f.manager2);
+}
+
+// ---------------------------------------------------------------------------
+// Per-manager form / streaks / best-worst / head-to-head — all derived from
+// the same full match list, counting only matches with a final score.
+// ---------------------------------------------------------------------------
+
+async function getFormGuide(managerId: string): Promise<FormResult[]> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+  const results: FormResult[] = [];
+
+  for (const match of matches.sort((a, b) => a.gameweek_id - b.gameweek_id)) {
+    if (match.score_1 === null || match.score_2 === null) continue;
+    const manager1 = byId.get(match.manager_1_id);
+    const manager2 = byId.get(match.manager_2_id);
+    if (!manager1 || !manager2) continue;
+
+    if (match.manager_1_id === managerId) {
+      results.push({
+        gameweek: match.gameweek_id,
+        result: match.score_1 > match.score_2 ? "W" : match.score_1 < match.score_2 ? "L" : "D",
+        pointsFor: match.score_1,
+        pointsAgainst: match.score_2,
+        opponent: manager2,
+      });
+    } else if (match.manager_2_id === managerId) {
+      results.push({
+        gameweek: match.gameweek_id,
+        result: match.score_2 > match.score_1 ? "W" : match.score_2 < match.score_1 ? "L" : "D",
+        pointsFor: match.score_2,
+        pointsAgainst: match.score_1,
+        opponent: manager1,
+      });
+    }
+  }
+  return results;
+}
+
+export async function getRankHistory(managerId: string): Promise<RankHistoryPoint[]> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  const managerIds = managers.map((m) => m.id);
+  const playedGameweeks = Array.from(
+    new Set(matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id))
+  ).sort((a, b) => a - b);
+
+  const points: RankHistoryPoint[] = [];
+  for (const gw of playedGameweeks) {
+    const table = tallyFromMatches(matches.filter((m) => m.gameweek_id <= gw), managerIds);
+    const ranked = managerIds
+      .map((id) => ({ id, ...table.get(id)! }))
+      .sort((a, b) => b.points - a.points || b.totalScored - a.totalScored);
+    const rank = ranked.findIndex((r) => r.id === managerId) + 1;
+    if (rank > 0) points.push({ gameweek: gw, rank });
+  }
+  return points;
+}
+
+export async function getBestAndWorstGameweek(
+  managerId: string
+): Promise<{ best: FormResult | null; worst: FormResult | null }> {
+  const form = await getFormGuide(managerId);
+  if (form.length === 0) return { best: null, worst: null };
+  const best = form.reduce((a, b) => (b.pointsFor > a.pointsFor ? b : a));
+  const worst = form.reduce((a, b) => (b.pointsFor < a.pointsFor ? b : a));
+  return { best, worst };
+}
+
+export async function getCurrentStreak(managerId: string): Promise<{ type: "W" | "D" | "L"; count: number } | null> {
+  const form = (await getFormGuide(managerId)).slice().reverse();
+  if (form.length === 0) return null;
+  const type = form[0].result;
+  let count = 0;
+  for (const entry of form) {
+    if (entry.result === type) count += 1;
+    else break;
+  }
+  return { type, count };
+}
+
+export async function getHeadToHeadRecord(managerId: string, opponentId: string): Promise<HeadToHeadRecord> {
+  const form = await getFormGuide(managerId);
+  const record: HeadToHeadRecord = { wins: 0, draws: 0, losses: 0 };
+  for (const entry of form) {
+    if (entry.opponent.id !== opponentId) continue;
+    if (entry.result === "W") record.wins += 1;
+    else if (entry.result === "D") record.draws += 1;
+    else record.losses += 1;
+  }
+  return record;
+}
+
+// ---------------------------------------------------------------------------
+// Stats page (PRD §11): Manager of the Week + per-manager streaks.
+// ---------------------------------------------------------------------------
+
+export interface ManagerOfTheWeek {
+  gameweek: number;
+  manager: Manager;
+  points: number;
+}
+
+/** Highest single-gameweek score across the league, for the most recent
+ * gameweek that has any final scores. Null pre-season / before GW1 finishes. */
+export async function getManagerOfTheWeek(): Promise<ManagerOfTheWeek | null> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+
+  const playedGameweeks = matches
+    .filter((m) => m.score_1 !== null && m.score_2 !== null)
+    .map((m) => m.gameweek_id);
+  if (playedGameweeks.length === 0) return null;
+  const latestGw = Math.max(...playedGameweeks);
+
+  let best: ManagerOfTheWeek | null = null;
+  for (const match of matches) {
+    if (match.gameweek_id !== latestGw) continue;
+    if (match.score_1 === null || match.score_2 === null) continue;
+    const candidates: [string, number][] = [
+      [match.manager_1_id, match.score_1],
+      [match.manager_2_id, match.score_2],
+    ];
+    for (const [managerId, points] of candidates) {
+      if (!best || points > best.points) {
+        const manager = byId.get(managerId);
+        if (manager) best = { gameweek: latestGw, manager, points };
+      }
+    }
+  }
+  return best;
+}
+
+export interface ManagerStreak {
+  manager: Manager;
+  streak: { type: "W" | "D" | "L"; count: number } | null;
+}
+
+export async function getAllStreaks(): Promise<ManagerStreak[]> {
+  const managers = await loadManagers();
+  const streaks = await Promise.all(managers.map((m) => getCurrentStreak(m.id)));
+  return managers.map((manager, i) => ({ manager, streak: streaks[i] }));
+}
+
+// ---------------------------------------------------------------------------
+// Manager squad — real, current roster from FPL's own Draft API. Draft
+// leagues assign players permanently at draft time (unlike Classic's
+// per-gameweek picks), so this is available and accurate right now, not
+// blocked on the season having started. Reflects trades/waivers within
+// ~5 minutes (see getElementStatus's cache setting in lib/fpl.ts).
+// ---------------------------------------------------------------------------
+
+const POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"] as const;
+
+export async function getManagerSquad(managerId: string): Promise<SquadPlayer[]> {
+  const client = getBrowserClient();
+  const [managerRows, bootstrap, elementStatus] = await Promise.all([
+    fetchManagerRows(client),
+    getBootstrap(),
+    getElementStatus(LEAGUE_ID),
+  ]);
+
+  const managerRow = managerRows.find((m) => m.id === managerId);
+  if (!managerRow) return [];
+
+  const ownedElementIds = new Set(
+    elementStatus.element_status.filter((e) => e.owner === managerRow.fpl_entry_id).map((e) => e.element)
+  );
+  if (ownedElementIds.size === 0) return [];
+
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+  const positionById = new Map(
+    bootstrap.element_types.map((t) => [t.id, t.singular_name_short as SquadPlayer["position"]])
+  );
+
+  const players: SquadPlayer[] = bootstrap.elements
+    .filter((el) => ownedElementIds.has(el.id))
+    .map((el) => ({
+      id: el.id,
+      name: el.web_name,
+      position: positionById.get(el.element_type) ?? "MID",
+      club: teamById.get(el.team)?.short_name ?? "?",
+      seasonPoints: el.total_points,
+      status: el.status,
+      photoCode: el.code,
+      clubCode: teamById.get(el.team)?.code ?? 0,
+    }));
+
+  players.sort((a, b) => {
+    const posDiff = POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position);
+    if (posDiff !== 0) return posDiff;
+    return b.seasonPoints - a.seasonPoints;
+  });
+
+  return players;
+}
+
+// ---------------------------------------------------------------------------
+// Gameweek lineup — the confirmed starting XI + 4 bench players a manager
+// actually fielded for one gameweek. Draft leagues require weekly lineup
+// submission (unlike squad ownership, which is permanent) — this is null
+// until that manager's lineup locks for the given gameweek; FPL's API
+// answers with a non-JSON "No pick history" body pre-lock, which
+// getEntryPicks already translates to `null` rather than throwing.
+// ---------------------------------------------------------------------------
+
+export async function getManagerGameweekLineup(
+  managerId: string,
+  gameweek: number
+): Promise<GameweekLineup | null> {
+  const client = getBrowserClient();
+  const managerRows = await fetchManagerRows(client);
+  const managerRow = managerRows.find((m) => m.id === managerId);
+  if (!managerRow) return null;
+
+  const [picks, bootstrap] = await Promise.all([
+    getEntryPicks(managerRow.fpl_entry_id, gameweek),
+    getBootstrap(),
+  ]);
+  if (!picks) return null;
+
+  const elementById = new Map(bootstrap.elements.map((el) => [el.id, el]));
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+  const positionById = new Map(
+    bootstrap.element_types.map((t) => [t.id, t.singular_name_short as SquadPlayer["position"]])
+  );
+
+  function toLineupPlayer(pick: FplEntryEventPick): LineupPlayer | null {
+    const el = elementById.get(pick.element);
+    if (!el) return null;
+    return {
+      id: el.id,
+      name: el.web_name,
+      position: positionById.get(el.element_type) ?? "MID",
+      club: teamById.get(el.team)?.short_name ?? "?",
+      seasonPoints: el.total_points,
+      status: el.status,
+      photoCode: el.code,
+      clubCode: teamById.get(el.team)?.code ?? 0,
+      isCaptain: pick.is_captain,
+      isViceCaptain: pick.is_vice_captain,
+    };
+  }
+
+  const byPositionThenPoints = (a: LineupPlayer, b: LineupPlayer) => {
+    const posDiff = POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position);
+    return posDiff !== 0 ? posDiff : b.seasonPoints - a.seasonPoints;
+  };
+
+  const starting = picks
+    .filter((p) => p.position <= 11)
+    .map(toLineupPlayer)
+    .filter((p): p is LineupPlayer => p !== null)
+    .sort(byPositionThenPoints);
+
+  const bench = picks
+    .filter((p) => p.position > 11)
+    .map(toLineupPlayer)
+    .filter((p): p is LineupPlayer => p !== null)
+    .sort(byPositionThenPoints);
+
+  return { starting, bench };
+}

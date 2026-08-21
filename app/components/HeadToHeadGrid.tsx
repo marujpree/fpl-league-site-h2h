@@ -1,12 +1,17 @@
 import Link from "next/link";
-import { MANAGERS, getHeadToHeadRecord, type Manager } from "./mock-data";
+import { getManagers, getHeadToHeadRecord } from "@/lib/data";
+import type { Manager } from "@/lib/fpl-types";
 
 type HeadToHeadGridProps = {
   manager: Manager;
 };
 
-export default function HeadToHeadGrid({ manager }: HeadToHeadGridProps) {
-  const opponents = MANAGERS.filter((m) => m.id !== manager.id);
+export default async function HeadToHeadGrid({ manager }: HeadToHeadGridProps) {
+  const managers = await getManagers();
+  const opponents = managers.filter((m) => m.id !== manager.id);
+  const records = await Promise.all(
+    opponents.map((opponent) => getHeadToHeadRecord(manager.id, opponent.id))
+  );
 
   return (
     <div className="overflow-hidden rounded-xl border border-card-border">
@@ -20,8 +25,8 @@ export default function HeadToHeadGrid({ manager }: HeadToHeadGridProps) {
           </tr>
         </thead>
         <tbody>
-          {opponents.map((opponent) => {
-            const record = getHeadToHeadRecord(manager.id, opponent.id);
+          {opponents.map((opponent, i) => {
+            const record = records[i];
             return (
               <tr key={opponent.id} className="border-t border-card-border">
                 <td className="px-3 py-2.5">

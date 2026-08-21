@@ -6,6 +6,7 @@
 
 import type {
   FplBootstrap,
+  FplElementStatus,
   FplEntryEventPick,
   FplEventLive,
   FplGameState,
@@ -13,6 +14,10 @@ import type {
 } from "./fpl-types";
 
 const BASE = "https://draft.premierleague.com/api";
+
+/** This dashboard is built for a single fixed league (PRD §12: single
+ * season, single league, no multi-tenancy) — league 49277, "Sigma Chi FC". */
+export const LEAGUE_ID = 49277;
 
 async function getJson<T>(path: string, revalidateSeconds: number): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -33,6 +38,14 @@ export function getLeagueDetails(leagueId: number): Promise<FplLeagueDetails> {
 /** Players, teams, gameweeks, fixtures. Static-ish; safe to cache longer. */
 export function getBootstrap(): Promise<FplBootstrap> {
   return getJson<FplBootstrap>(`/bootstrap-static`, 3600);
+}
+
+/** Who owns which player right now (permanent Draft ownership, not
+ * per-gameweek picks) — reflects trades/waivers as soon as they're
+ * confirmed on FPL's side. Cached 5min so a trade shows up promptly
+ * without re-fetching ~600 players on every page view. */
+export function getElementStatus(leagueId: number): Promise<{ element_status: FplElementStatus[] }> {
+  return getJson<{ element_status: FplElementStatus[] }>(`/league/${leagueId}/element-status`, 300);
 }
 
 /** Whether a gameweek is currently live. Poll this frequently. */

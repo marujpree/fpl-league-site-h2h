@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { StandingsRow } from "./mock-data";
+import type { StandingsRow } from "@/lib/fpl-types";
 
 const RANK_ACCENT: Record<number, string> = {
   1: "#eab308", // gold

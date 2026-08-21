@@ -37,6 +37,7 @@ export interface ManagerRow {
   fpl_entry_id: number;
   display_name: string;
   team_name: string;
+  initials: string;
   draft_order: number | null;
 }
 

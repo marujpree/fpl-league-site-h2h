@@ -3,21 +3,23 @@
 
 -- The 10 real managers, pulled from
 -- https://draft.premierleague.com/api/league/49277/details on 2026-08-21.
-insert into managers (id, fpl_entry_id, display_name, team_name, draft_order) values
-  ('reyes-fc',        258940, 'Santiago Reyes',     'Reyes FC',         5),
-  ('forest-team',     259925, 'Miguel Galicia',     'Forest Team',      8),
-  ('rw',               264749, 'Jared Bolanos',      'RW',              10),
-  ('brunodagoat',      335991, 'julio garcia',       'Brunodagoat',      9),
-  ('frankdatnk',       337954, 'Franky Villarreal',  'frankdatnk',       4),
-  ('gooner-fc',        352456, 'Brendan Gerstbrein', 'Gooner FC',        7),
-  ('beans-n-rice-fc',  375050, 'Rodrigo Medina',     'Beans n Rice FC',  3),
-  ('gordon-1s',        394181, 'Carlos Alejandro',   'Gordon 1s',        1),
-  ('beginners-luck',   394216, 'Daniel Azucar',      'Beginners luck',   6),
-  ('dobel-fc',         394619, 'Fernando Lastra',    'Dobel FC',         2)
+-- `initials` is FPL's own league_entries[].short_name for each manager.
+insert into managers (id, fpl_entry_id, display_name, team_name, initials, draft_order) values
+  ('reyes-fc',        258940, 'Santiago Reyes',     'Reyes FC',         'SR', 5),
+  ('forest-team',     259925, 'Miguel Galicia',     'Forest Team',      'MG', 8),
+  ('rw',               264749, 'Jared Bolanos',      'RW',              'JB', 10),
+  ('brunodagoat',      335991, 'julio garcia',       'Brunodagoat',      'JG', 9),
+  ('frankdatnk',       337954, 'Franky Villarreal',  'frankdatnk',       'FV', 4),
+  ('gooner-fc',        352456, 'Brendan Gerstbrein', 'Gooner FC',        'BG', 7),
+  ('beans-n-rice-fc',  375050, 'Rodrigo Medina',     'Beans n Rice FC',  'RM', 3),
+  ('gordon-1s',        394181, 'Carlos Alejandro',   'Gordon 1s',        'CA', 1),
+  ('beginners-luck',   394216, 'Daniel Azucar',      'Beginners luck',   'DA', 6),
+  ('dobel-fc',         394619, 'Fernando Lastra',    'Dobel FC',         'FL', 2)
 on conflict (id) do update set
   fpl_entry_id = excluded.fpl_entry_id,
   display_name = excluded.display_name,
   team_name = excluded.team_name,
+  initials = excluded.initials,
   draft_order = excluded.draft_order;
 
 -- Real GW1-38 deadline times, from bootstrap-static (fetched 2026-08-21).

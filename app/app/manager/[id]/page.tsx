@@ -1,34 +1,44 @@
 import { notFound } from "next/navigation";
 import HeadToHeadGrid from "@/components/HeadToHeadGrid";
+import LineupView from "@/components/LineupView";
 import RankSparkline from "@/components/RankSparkline";
+import SquadList from "@/components/SquadList";
 import StatTile from "@/components/StatTile";
 import StreakBadge from "@/components/StreakBadge";
 import {
-  MANAGERS,
   getBestAndWorstGameweek,
+  getCurrentGameweek,
   getCurrentStreak,
   getManagerById,
+  getManagers,
+  getManagerGameweekLineup,
+  getManagerSquad,
   getRankHistory,
-} from "@/components/mock-data";
+} from "@/lib/data";
 
-// NOTE: mock data -- see components/mock-data.ts. Rank history, streaks and
-// best/worst gameweeks are all derived from the fabricated GW1-6 season.
-
-export function generateStaticParams() {
-  return MANAGERS.map((manager) => ({ id: manager.id }));
+export async function generateStaticParams() {
+  const managers = await getManagers();
+  return managers.map((manager) => ({ id: manager.id }));
 }
 
 export default async function ManagerProfilePage(props: PageProps<"/manager/[id]">) {
   const { id } = await props.params;
-  const manager = getManagerById(id);
+  const manager = await getManagerById(id);
 
   if (!manager) {
     notFound();
   }
 
-  const rankHistory = getRankHistory(manager.id);
-  const { best, worst } = getBestAndWorstGameweek(manager.id);
-  const streak = getCurrentStreak(manager.id);
+  const [rankHistory, { best, worst }, streak, managers, squad, currentGameweek] = await Promise.all([
+    getRankHistory(manager.id),
+    getBestAndWorstGameweek(manager.id),
+    getCurrentStreak(manager.id),
+    getManagers(),
+    getManagerSquad(manager.id),
+    getCurrentGameweek(),
+  ]);
+  const leagueSize = managers.length;
+  const lineup = currentGameweek ? await getManagerGameweekLineup(manager.id, currentGameweek.id) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -53,19 +63,35 @@ export default async function ManagerProfilePage(props: PageProps<"/manager/[id]
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Rank over time</h2>
         <div className="rounded-xl border border-card-border bg-card p-4">
-          <RankSparkline history={rankHistory} color={manager.accentColor} leagueSize={MANAGERS.length} />
+          {rankHistory.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted">No games played yet this season.</p>
+          ) : (
+            <RankSparkline history={rankHistory} color={manager.accentColor} leagueSize={leagueSize} />
+          )}
         </div>
       </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Best GW" value={best ? best.pointsFor : "-"} detail={best ? `GW${best.gameweek} vs ${best.opponent.teamName}` : undefined} accent="var(--win)" />
         <StatTile label="Worst GW" value={worst ? worst.pointsFor : "-"} detail={worst ? `GW${worst.gameweek} vs ${worst.opponent.teamName}` : undefined} accent="var(--loss)" />
-        <StatTile label="Current rank" value={rankHistory[rankHistory.length - 1]?.rank ?? "-"} detail={`of ${MANAGERS.length}`} />
-        <StatTile label="Starting rank" value={rankHistory[0]?.rank ?? "-"} detail={`GW${rankHistory[0]?.gameweek ?? 1}`} />
+        <StatTile label="Current rank" value={rankHistory[rankHistory.length - 1]?.rank ?? "-"} detail={`of ${leagueSize}`} />
+        <StatTile label="Starting rank" value={rankHistory[0]?.rank ?? "-"} detail={rankHistory[0] ? `GW${rankHistory[0].gameweek}` : undefined} />
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Head-to-head record</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          {currentGameweek ? `Gameweek ${currentGameweek.id} lineup` : "Gameweek lineup"}
+        </h2>
+        <LineupView lineup={lineup} gameweek={currentGameweek?.id ?? null} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Full squad</h2>
+        <SquadList players={squad} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Head to head record</h2>
         <HeadToHeadGrid manager={manager} />
       </section>
     </div>

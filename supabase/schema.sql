@@ -10,6 +10,7 @@ create table if not exists managers (
   fpl_entry_id integer not null unique,        -- FPL Draft entry_id
   display_name text not null,                  -- manager's real name
   team_name    text not null,                  -- their FPL team name
+  initials     text not null default '',       -- FPL league_entries.short_name
   draft_order  integer                         -- nullable; waiver_pick order
 );
 
