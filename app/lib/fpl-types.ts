@@ -228,6 +228,10 @@ export interface LineupPlayer extends SquadPlayer {
   isViceCaptain: boolean;
 }
 
+export interface PlayerListEntry extends SquadPlayer {
+  owner: Manager | null; // null = free agent
+}
+
 export interface GameweekLineup {
   starting: LineupPlayer[];
   bench: LineupPlayer[];

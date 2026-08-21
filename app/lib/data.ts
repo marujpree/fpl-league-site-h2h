@@ -19,6 +19,7 @@ import type {
   Manager,
   MatchupSummary,
   PairRecord,
+  PlayerListEntry,
   RankHistoryPoint,
   SquadPlayer,
   StandingsRow,
@@ -30,7 +31,7 @@ import {
   getCurrentGameweek as fetchCurrentGameweekRow,
 } from "./supabase";
 
-export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, PairRecord, RankHistoryPoint, SquadPlayer, StandingsRow };
+export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, PairRecord, PlayerListEntry, RankHistoryPoint, SquadPlayer, StandingsRow };
 export { TOTAL_GAMEWEEKS } from "./fpl-types";
 
 function toManager(row: ManagerRow): Manager {
@@ -474,4 +475,43 @@ export async function getManagerGameweekLineup(
     .sort(byPositionThenPoints);
 
   return { starting, bench };
+}
+
+// ---------------------------------------------------------------------------
+// Players tab — every player in the game (~600), with who owns them (or
+// free agent) right now. For "who has this guy" lookups during a live GW.
+// ---------------------------------------------------------------------------
+
+export async function getAllPlayers(): Promise<PlayerListEntry[]> {
+  const [managers, managerRows, bootstrap, elementStatus] = await Promise.all([
+    loadManagers(),
+    fetchManagerRows(getBrowserClient()),
+    getBootstrap(),
+    getElementStatus(LEAGUE_ID),
+  ]);
+
+  const managerByEntryId = new Map(
+    managerRows.map((row) => [row.fpl_entry_id, managers.find((m) => m.id === row.id) ?? null])
+  );
+  const ownerByElementId = new Map(elementStatus.element_status.map((e) => [e.element, e.owner]));
+
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+  const positionById = new Map(
+    bootstrap.element_types.map((t) => [t.id, t.singular_name_short as SquadPlayer["position"]])
+  );
+
+  return bootstrap.elements.map((el) => {
+    const ownerEntryId = ownerByElementId.get(el.id) ?? null;
+    return {
+      id: el.id,
+      name: el.web_name,
+      position: positionById.get(el.element_type) ?? "MID",
+      club: teamById.get(el.team)?.short_name ?? "?",
+      seasonPoints: el.total_points,
+      status: el.status,
+      photoCode: el.code,
+      clubCode: teamById.get(el.team)?.code ?? 0,
+      owner: ownerEntryId !== null ? managerByEntryId.get(ownerEntryId) ?? null : null,
+    };
+  });
 }
