@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "//": "Daily fallback ONLY — Vercel Hobby plan's cron minimum interval is once per day, it cannot run sub-daily. This is NOT the live-during-gameweek polling mechanism; it just guarantees live_points_cache isn't totally stale if nothing else pinged /api/poll that day. Real ~60s freshness during an active gameweek comes from an external pinger (e.g. cron-job.org) hitting /api/poll with the x-poll-secret header, or from client-side polling of the public /api/live route — see SETUP.md.",
+      "path": "/api/poll",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}
