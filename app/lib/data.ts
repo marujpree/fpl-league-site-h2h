@@ -8,13 +8,14 @@
 
 import { getBrowserClient } from "./supabase";
 import { getManagerColor } from "@/components/manager-color";
-import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, LEAGUE_ID } from "./fpl";
+import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, getEventLive, LEAGUE_ID } from "./fpl";
 import type {
   FixtureEntry,
   FormResult,
   FplEntryEventPick,
   GameweekLineup,
   HeadToHeadRecord,
+  LineupFixture,
   LineupPlayer,
   Manager,
   MatchupSummary,
@@ -238,6 +239,7 @@ export interface PLFixtureRow {
   awayScore: number | null;
   started: boolean;
   finished: boolean;
+  minutes: number;
 }
 
 export async function getPLFixtures(): Promise<{
@@ -263,6 +265,7 @@ export async function getPLFixtures(): Promise<{
       awayScore: f.team_a_score,
       started: f.started,
       finished: f.finished,
+      minutes: f.minutes,
     }))
     .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
 
@@ -448,6 +451,7 @@ export async function getManagerSquad(managerId: string): Promise<SquadPlayer[]>
       name: el.web_name,
       position: positionById.get(el.element_type) ?? "MID",
       club: teamById.get(el.team)?.short_name ?? "?",
+      teamId: el.team,
       seasonPoints: el.total_points,
       status: el.status,
       photoCode: el.code,
@@ -481,9 +485,11 @@ export async function getManagerGameweekLineup(
   const managerRow = managerRows.find((m) => m.id === managerId);
   if (!managerRow) return null;
 
-  const [picks, bootstrap] = await Promise.all([
+  const [picks, bootstrap, live, allFixtures] = await Promise.all([
     getEntryPicks(managerRow.fpl_entry_id, gameweek),
     getBootstrap(),
+    getEventLive(gameweek),
+    getAllFixtures(),
   ]);
   if (!picks) return null;
 
@@ -493,20 +499,39 @@ export async function getManagerGameweekLineup(
     bootstrap.element_types.map((t) => [t.id, t.singular_name_short as SquadPlayer["position"]])
   );
 
+  // Real-world PL fixtures for this gameweek, keyed by team id -- almost
+  // always one fixture per team, two on a double gameweek.
+  const fixturesByTeam = new Map<number, LineupFixture[]>();
+  for (const f of allFixtures) {
+    if (f.event !== gameweek) continue;
+    const home = teamById.get(f.team_h);
+    const away = teamById.get(f.team_a);
+    const homeList = fixturesByTeam.get(f.team_h) ?? [];
+    homeList.push({ opponentShortName: away?.short_name ?? "?", isHome: true, started: f.started, finished: f.finished });
+    fixturesByTeam.set(f.team_h, homeList);
+    const awayList = fixturesByTeam.get(f.team_a) ?? [];
+    awayList.push({ opponentShortName: home?.short_name ?? "?", isHome: false, started: f.started, finished: f.finished });
+    fixturesByTeam.set(f.team_a, awayList);
+  }
+
   function toLineupPlayer(pick: FplEntryEventPick): LineupPlayer | null {
     const el = elementById.get(pick.element);
     if (!el) return null;
+    const liveStats = live.elements[String(el.id)]?.stats;
     return {
       id: el.id,
       name: el.web_name,
       position: positionById.get(el.element_type) ?? "MID",
       club: teamById.get(el.team)?.short_name ?? "?",
+      teamId: el.team,
       seasonPoints: el.total_points,
       status: el.status,
       photoCode: el.code,
       clubCode: teamById.get(el.team)?.code ?? 0,
       isCaptain: pick.is_captain,
       isViceCaptain: pick.is_vice_captain,
+      livePoints: (liveStats?.total_points ?? 0) * pick.multiplier,
+      fixtures: fixturesByTeam.get(el.team) ?? [],
     };
   }
 
@@ -527,7 +552,9 @@ export async function getManagerGameweekLineup(
     .filter((p): p is LineupPlayer => p !== null)
     .sort(byPositionThenPoints);
 
-  return { starting, bench };
+  const totalPoints = starting.reduce((sum, p) => sum + p.livePoints, 0);
+
+  return { starting, bench, totalPoints };
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +587,7 @@ export async function getAllPlayers(): Promise<PlayerListEntry[]> {
       name: el.web_name,
       position: positionById.get(el.element_type) ?? "MID",
       club: teamById.get(el.team)?.short_name ?? "?",
+      teamId: el.team,
       seasonPoints: el.total_points,
       status: el.status,
       photoCode: el.code,

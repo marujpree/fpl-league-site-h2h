@@ -86,6 +86,7 @@ export interface FplFixture {
   started: boolean;
   finished: boolean;
   finished_provisional: boolean;
+  minutes: number;
   team_h: number;
   team_a: number;
   team_h_score: number | null;
@@ -215,6 +216,7 @@ export interface SquadPlayer {
   name: string; // FPL web_name, e.g. "Salah"
   position: "GKP" | "DEF" | "MID" | "FWD";
   club: string; // club short_name, e.g. "LIV"
+  teamId: number; // FplTeam.id -- joins against FplFixture.team_h/team_a
   seasonPoints: number;
   status: string; // "a" available, "i" injured, "d" doubtful, "s" suspended, "u" unavailable
   /** Builds a photo URL: `https://resources.premierleague.com/premierleague/photos/players/110x140/p${photoCode}.png` */
@@ -223,9 +225,22 @@ export interface SquadPlayer {
   clubCode: number;
 }
 
+/** A player's real-world fixture(s) for one gameweek -- almost always one,
+ * but a double gameweek gives a player two. */
+export interface LineupFixture {
+  opponentShortName: string;
+  isHome: boolean;
+  started: boolean;
+  finished: boolean;
+}
+
 export interface LineupPlayer extends SquadPlayer {
   isCaptain: boolean;
   isViceCaptain: boolean;
+  /** This gameweek's live points so far, already multiplier-adjusted (i.e.
+   * doubled for the captain) -- same math as /api/poll. */
+  livePoints: number;
+  fixtures: LineupFixture[];
 }
 
 export interface PlayerListEntry extends SquadPlayer {
@@ -235,6 +250,9 @@ export interface PlayerListEntry extends SquadPlayer {
 export interface GameweekLineup {
   starting: LineupPlayer[];
   bench: LineupPlayer[];
+  /** Sum of the starting XI's live points -- bench doesn't count, same as
+   * real FPL's "Latest Points" figure. */
+  totalPoints: number;
 }
 
 export interface RankHistoryPoint {

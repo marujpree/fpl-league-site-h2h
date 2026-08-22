@@ -15,7 +15,7 @@ function formatKickoff(iso: string): string {
 }
 
 export default function PLFixtureCard({ fixture }: { fixture: PLFixtureRow }) {
-  const { home, away, homeScore, awayScore, started, finished, kickoff } = fixture;
+  const { home, away, homeScore, awayScore, started, finished, minutes, kickoff } = fixture;
   const played = homeScore !== null && awayScore !== null;
   const isLive = started && !finished;
 
@@ -27,15 +27,21 @@ export default function PLFixtureCard({ fixture }: { fixture: PLFixtureRow }) {
       <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4 sm:pt-3">
         <span className="text-xs font-medium text-muted">{formatKickoff(kickoff)}</span>
         {finished ? (
-          <span className="rounded-full border border-card-border bg-background-elevated px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-            FT
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-win/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-win">
+            <span className="h-1.5 w-1.5 rounded-full bg-win" aria-hidden />
+            Played
           </span>
         ) : isLive ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-live/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-live">
             <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-live" aria-hidden />
-            Live
+            Live &middot; {minutes}&apos;
           </span>
-        ) : null}
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-background-elevated px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-muted/50" aria-hidden />
+            Not started
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
