@@ -59,7 +59,7 @@ export default function PitchPlayerCard({ player, onGreen = true }: PitchPlayerC
           {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
           {isDone && (
             <span
-              className="flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-white text-[7px] font-black leading-none text-win"
+              className="flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-win text-[7px] font-black leading-none text-white"
               aria-label="Played"
               title="Played"
             >

@@ -843,10 +843,18 @@ async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
   });
 }
 
+export interface RecentTransactionPlayer {
+  name: string;
+  position: string;
+  clubCode: number;
+}
+
 export interface RecentTransaction {
   id: string;
   kind: "waiver" | "trade";
-  summary: string;
+  managerLabel: string;
+  playerIn: RecentTransactionPlayer;
+  playerOut: RecentTransactionPlayer;
   gameweek: number;
   timestamp: string;
 }
@@ -857,57 +865,33 @@ export interface RecentTransaction {
  * own a given player at a time, so there's rarely more than one add of the
  * same player in a week to rank in the first place. */
 export async function getRecentTransactions(limit = 15): Promise<RecentTransaction[]> {
-  const paired = await getPairedTransactions();
+  const [paired, bootstrap] = await Promise.all([getPairedTransactions(), getBootstrap()]);
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+  const positionById = new Map(bootstrap.element_types.map((t) => [t.id, t.singular_name_short]));
+
+  function toPlayer(el: FplElement): RecentTransactionPlayer {
+    return {
+      name: el.web_name,
+      position: positionById.get(el.element_type) ?? "?",
+      clubCode: teamById.get(el.team)?.code ?? 0,
+    };
+  }
+
   return paired
     .map((p) => ({
       id: p.id,
       kind: p.kind,
-      summary:
+      managerLabel:
         p.kind === "trade" && p.managerB
-          ? `${p.managerA.display_name} ↔ ${p.managerB.display_name}: ${p.playerOut.web_name} for ${p.playerIn.web_name}`
-          : `${p.managerA.display_name}: dropped ${p.playerOut.web_name}, added ${p.playerIn.web_name}`,
+          ? `${p.managerA.display_name} ↔ ${p.managerB.display_name}`
+          : p.managerA.display_name,
+      playerIn: toPlayer(p.playerIn),
+      playerOut: toPlayer(p.playerOut),
       gameweek: p.gameweek,
       timestamp: p.timestamp,
     }))
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, limit);
-}
-
-// ---------------------------------------------------------------------------
-// Captain tip (This Gameweek page) -- a lightweight "who's hot" hint, not a
-// real prediction model. Draft's bootstrap-static leaves ep_next null for
-// every player (that's Classic-FPL-only), so this uses `form` instead: the
-// highest points-per-match among available (status "a"), currently-owned
-// players league-wide.
-// ---------------------------------------------------------------------------
-
-export interface CaptainTip {
-  playerId: number;
-  name: string;
-  club: string;
-  clubCode: number;
-  photoCode: number;
-  form: number;
-}
-
-export async function getCaptainTip(): Promise<CaptainTip | null> {
-  const [bootstrap, elementStatus] = await Promise.all([getBootstrap(), getElementStatus(LEAGUE_ID)]);
-  const ownedElementIds = new Set(
-    elementStatus.element_status.filter((e) => e.owner !== null).map((e) => e.element)
-  );
-  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
-
-  let best: CaptainTip | null = null;
-  for (const el of bootstrap.elements) {
-    if (!ownedElementIds.has(el.id) || el.status !== "a") continue;
-    const form = parseFloat(el.form);
-    if (Number.isNaN(form)) continue;
-    if (!best || form > best.form) {
-      const team = teamById.get(el.team);
-      best = { playerId: el.id, name: el.web_name, club: team?.short_name ?? "?", clubCode: team?.code ?? 0, photoCode: el.code, form };
-    }
-  }
-  return best;
 }
 
 export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
