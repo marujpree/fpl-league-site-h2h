@@ -661,6 +661,71 @@ async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
   ];
 }
 
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+/** League-wide standings rank at a given point in the season (only
+ * considering matches through that gameweek) -- same tie-break as
+ * standingsRowsFromMatches, just returning ranks keyed by manager id. */
+function ranksThroughGameweek(matches: H2HMatchRow[], managerIds: string[], throughGw: number): Map<string, number> {
+  const table = tallyFromMatches(
+    matches.filter((m) => m.gameweek_id <= throughGw),
+    managerIds
+  );
+  const ranked = managerIds
+    .map((id) => ({ id, ...table.get(id)! }))
+    .sort((a, b) => b.points - a.points || b.totalScored - a.totalScored);
+  const ranks = new Map<string, number>();
+  ranked.forEach((r, i) => ranks.set(r.id, i + 1));
+  return ranks;
+}
+
+/** Whoever climbed the most standings positions between the two most
+ * recently finished gameweeks. Needs at least two finished gameweeks to
+ * have anything to compare. */
+async function getBiggestMoverHeadline(): Promise<NewsHeadline[]> {
+  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const managerIds = managers.map((m) => m.id);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+  const deadlineByGw = new Map(bootstrap.events.data.map((e) => [e.id, e.deadline_time]));
+
+  const playedGws = Array.from(
+    new Set(matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id))
+  ).sort((a, b) => a - b);
+  if (playedGws.length < 2) return [];
+
+  const latestGw = playedGws[playedGws.length - 1];
+  const prevGw = playedGws[playedGws.length - 2];
+
+  const ranksNow = ranksThroughGameweek(matches, managerIds, latestGw);
+  const ranksBefore = ranksThroughGameweek(matches, managerIds, prevGw);
+
+  let best: { managerId: string; delta: number; newRank: number } | null = null;
+  for (const id of managerIds) {
+    const before = ranksBefore.get(id) ?? 0;
+    const now = ranksNow.get(id) ?? 0;
+    const delta = before - now; // positive = moved up the table
+    if (delta > 0 && (!best || delta > best.delta)) best = { managerId: id, delta, newRank: now };
+  }
+  if (!best) return [];
+
+  const manager = byId.get(best.managerId);
+  if (!manager) return [];
+
+  return [
+    {
+      id: `mover-${latestGw}`,
+      category: "biggest-mover",
+      headline: `Biggest Mover: ${manager.teamName} climbs ${best.delta} spot${best.delta === 1 ? "" : "s"} to ${ordinal(best.newRank)}`,
+      subtext: `Gameweek ${latestGw}`,
+      timestamp: deadlineByGw.get(latestGw) ?? new Date().toISOString(),
+    },
+  ];
+}
+
 async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
   const [managerRows, bootstrap, transactions] = await Promise.all([
     fetchManagerRows(getBrowserClient()),
@@ -781,13 +846,51 @@ export async function getWaiverTrends(): Promise<WaiverTrends> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Captain tip (This Gameweek page) -- a lightweight "who's hot" hint, not a
+// real prediction model. Draft's bootstrap-static leaves ep_next null for
+// every player (that's Classic-FPL-only), so this uses `form` instead: the
+// highest points-per-match among available (status "a"), currently-owned
+// players league-wide.
+// ---------------------------------------------------------------------------
+
+export interface CaptainTip {
+  playerId: number;
+  name: string;
+  club: string;
+  clubCode: number;
+  photoCode: number;
+  form: number;
+}
+
+export async function getCaptainTip(): Promise<CaptainTip | null> {
+  const [bootstrap, elementStatus] = await Promise.all([getBootstrap(), getElementStatus(LEAGUE_ID)]);
+  const ownedElementIds = new Set(
+    elementStatus.element_status.filter((e) => e.owner !== null).map((e) => e.element)
+  );
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+
+  let best: CaptainTip | null = null;
+  for (const el of bootstrap.elements) {
+    if (!ownedElementIds.has(el.id) || el.status !== "a") continue;
+    const form = parseFloat(el.form);
+    if (Number.isNaN(form)) continue;
+    if (!best || form > best.form) {
+      const team = teamById.get(el.team);
+      best = { playerId: el.id, name: el.web_name, club: team?.short_name ?? "?", clubCode: team?.code ?? 0, photoCode: el.code, form };
+    }
+  }
+  return best;
+}
+
 export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
-  const [matchday, monthly, transactions] = await Promise.all([
+  const [matchday, monthly, mover, transactions] = await Promise.all([
     getMatchdayHeadlines(),
     getMonthlyHeadline(),
+    getBiggestMoverHeadline(),
     getTransactionHeadlines(),
   ]);
-  return [...matchday, ...monthly, ...transactions].sort(
+  return [...matchday, ...monthly, ...mover, ...transactions].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 }

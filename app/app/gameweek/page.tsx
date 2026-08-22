@@ -1,8 +1,13 @@
+import CaptainTip from "@/components/CaptainTip";
 import LiveGameweekView from "@/components/LiveGameweekView";
-import { getCurrentGameweek, getCurrentGameweekMatchups } from "@/lib/data";
+import { getCaptainTip, getCurrentGameweek, getCurrentGameweekMatchups } from "@/lib/data";
 
 export default async function GameweekPage() {
-  const [matchups, gameweek] = await Promise.all([getCurrentGameweekMatchups(), getCurrentGameweek()]);
+  const [matchups, gameweek, captainTip] = await Promise.all([
+    getCurrentGameweekMatchups(),
+    getCurrentGameweek(),
+    getCaptainTip(),
+  ]);
 
   return (
     <div className="flex flex-col gap-3 sm:gap-5">
@@ -14,6 +19,8 @@ export default async function GameweekPage() {
           {gameweek ? `Gameweek ${gameweek.id} matchups` : "Season hasn't started yet"}
         </p>
       </div>
+
+      <CaptainTip tip={captainTip} />
 
       {matchups.length === 0 ? (
         <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">

@@ -4,6 +4,7 @@ const CATEGORY_LABEL: Record<NewsCategory, string> = {
   "manager-of-week": "Manager of the Week",
   "biggest-loss": "Biggest Loser",
   "manager-of-month": "Manager of the Month",
+  "biggest-mover": "Biggest Mover",
   waiver: "Waiver Wire",
   trade: "Trade",
 };
@@ -12,6 +13,7 @@ const CATEGORY_STYLE: Record<NewsCategory, string> = {
   "manager-of-week": "bg-win/10 text-win",
   "biggest-loss": "bg-loss/10 text-loss",
   "manager-of-month": "bg-accent/10 text-accent-strong",
+  "biggest-mover": "bg-accent/10 text-accent-strong",
   waiver: "bg-live/10 text-live",
   trade: "bg-live/10 text-live",
 };

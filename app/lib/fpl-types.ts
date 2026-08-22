@@ -77,6 +77,11 @@ export interface FplElement {
   element_type: number;
   total_points: number;
   status: string; // "a" available, "i" injured, etc.
+  /** Points per match over the last 30 days, as a numeric string (e.g.
+   * "11.0"). Draft's bootstrap-static leaves `ep_next` null for every
+   * player (that's a Classic-FPL-only field), so this is the best
+   * available "who's hot right now" signal. */
+  form: string;
 }
 
 export interface FplFixture {
@@ -307,7 +312,13 @@ export interface PairRecord {
 
 export const TOTAL_GAMEWEEKS = 38;
 
-export type NewsCategory = "biggest-loss" | "manager-of-week" | "manager-of-month" | "waiver" | "trade";
+export type NewsCategory =
+  | "biggest-loss"
+  | "manager-of-week"
+  | "manager-of-month"
+  | "biggest-mover"
+  | "waiver"
+  | "trade";
 
 export interface NewsHeadline {
   id: string;
