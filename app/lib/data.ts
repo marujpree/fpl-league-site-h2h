@@ -8,7 +8,7 @@
 
 import { getBrowserClient } from "./supabase";
 import { getManagerColor } from "@/components/manager-color";
-import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, getEventLive, LEAGUE_ID } from "./fpl";
+import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, getEventLive, getTransactions, LEAGUE_ID } from "./fpl";
 import type {
   FixtureEntry,
   FormResult,
@@ -19,6 +19,7 @@ import type {
   LineupPlayer,
   Manager,
   MatchupSummary,
+  NewsHeadline,
   PairRecord,
   PlayerListEntry,
   RankHistoryPoint,
@@ -33,7 +34,7 @@ import {
   getLiveScores,
 } from "./supabase";
 
-export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, PairRecord, PlayerListEntry, RankHistoryPoint, SquadPlayer, StandingsRow };
+export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, NewsHeadline, PairRecord, PlayerListEntry, RankHistoryPoint, SquadPlayer, StandingsRow };
 export { TOTAL_GAMEWEEKS } from "./fpl-types";
 
 function toManager(row: ManagerRow): Manager {
@@ -532,6 +533,216 @@ export async function getAllStreaks(): Promise<ManagerStreak[]> {
   const managers = await loadManagers();
   const streaks = await Promise.all(managers.map((m) => getCurrentStreak(m.id)));
   return managers.map((manager, i) => ({ manager, streak: streaks[i] }));
+}
+
+// ---------------------------------------------------------------------------
+// News — auto-generated headlines: biggest blowout / biggest loss each
+// finished gameweek, a monthly recap once a calendar month of gameweeks has
+// fully completed, and waiver/trade write-ups sourced from FPL's own
+// transaction log.
+// ---------------------------------------------------------------------------
+
+/** Cheap deterministic pick so the same event always renders the same
+ * headline phrasing (no reshuffling on every request) without needing
+ * server-side state to remember what was shown last time. */
+function pickTemplate(templates: string[], seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return templates[Math.abs(hash) % templates.length];
+}
+
+async function getMatchdayHeadlines(): Promise<NewsHeadline[]> {
+  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+  const deadlineByGw = new Map(bootstrap.events.data.map((e) => [e.id, e.deadline_time]));
+
+  const playedGws = Array.from(
+    new Set(matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id))
+  );
+  if (playedGws.length === 0) return [];
+  const latestGw = Math.max(...playedGws);
+
+  let biggest: { match: H2HMatchRow; margin: number } | null = null;
+  for (const m of matches) {
+    if (m.gameweek_id !== latestGw || m.score_1 === null || m.score_2 === null) continue;
+    const margin = Math.abs(m.score_1 - m.score_2);
+    if (!biggest || margin > biggest.margin) biggest = { match: m, margin };
+  }
+  if (!biggest || biggest.margin === 0) return []; // a tie has no winner/loser to crown
+
+  const { match, margin } = biggest;
+  const winnerId = match.score_1! > match.score_2! ? match.manager_1_id : match.manager_2_id;
+  const loserId = winnerId === match.manager_1_id ? match.manager_2_id : match.manager_1_id;
+  const winner = byId.get(winnerId);
+  const loser = byId.get(loserId);
+  if (!winner || !loser) return [];
+
+  const timestamp = deadlineByGw.get(latestGw) ?? new Date().toISOString();
+
+  const winHeadline = pickTemplate(
+    [
+      `${winner.teamName} demolishes ${loser.teamName} by ${margin} points — Manager of the Week`,
+      `${winner.teamName} puts on a clinic, beating ${loser.teamName} by ${margin}`,
+      `Manager of the Week: ${winner.teamName}, after a ${margin}-point beatdown of ${loser.teamName}`,
+    ],
+    `motw-${latestGw}-${winner.id}`
+  );
+  const lossHeadline = pickTemplate(
+    [
+      `${loser.teamName} gets steamrolled by ${winner.teamName}, falling ${margin} points short`,
+      `Ouch — ${loser.teamName} drops a ${margin}-point stinker against ${winner.teamName}`,
+      `Biggest Loser of GW${latestGw}: ${loser.teamName}, beaten by ${margin} points`,
+    ],
+    `loss-${latestGw}-${loser.id}`
+  );
+
+  return [
+    { id: `motw-${latestGw}`, category: "manager-of-week", headline: winHeadline, subtext: `Gameweek ${latestGw}`, timestamp },
+    { id: `loss-${latestGw}`, category: "biggest-loss", headline: lossHeadline, subtext: `Gameweek ${latestGw}`, timestamp },
+  ];
+}
+
+/** Manager of the Month -- only for the most recently *fully completed*
+ * calendar month of gameweeks, so it doesn't flicker on mid-month and
+ * doesn't need any "have I shown this already" state. */
+async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
+  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+
+  const monthKey = (iso: string) => iso.slice(0, 7); // "2026-08"
+  const gwsByMonth = new Map<string, number[]>();
+  for (const e of bootstrap.events.data) {
+    const key = monthKey(e.deadline_time);
+    const list = gwsByMonth.get(key) ?? [];
+    list.push(e.id);
+    gwsByMonth.set(key, list);
+  }
+  const finishedGwIds = new Set(bootstrap.events.data.filter((e) => e.finished).map((e) => e.id));
+
+  const completedMonths = Array.from(gwsByMonth.entries())
+    .filter(([, gws]) => gws.every((gw) => finishedGwIds.has(gw)))
+    .sort(([a], [b]) => b.localeCompare(a));
+  if (completedMonths.length === 0) return [];
+  const [latestMonthKey, monthGws] = completedMonths[0];
+
+  const totals = new Map<string, number>();
+  for (const m of matches) {
+    if (!monthGws.includes(m.gameweek_id)) continue;
+    if (m.score_1 !== null) totals.set(m.manager_1_id, (totals.get(m.manager_1_id) ?? 0) + m.score_1);
+    if (m.score_2 !== null) totals.set(m.manager_2_id, (totals.get(m.manager_2_id) ?? 0) + m.score_2);
+  }
+  if (totals.size === 0) return [];
+
+  let bestId: string | null = null;
+  let bestPoints = -Infinity;
+  for (const [id, points] of totals) {
+    if (points > bestPoints) {
+      bestId = id;
+      bestPoints = points;
+    }
+  }
+  const best = bestId ? byId.get(bestId) : null;
+  if (!best) return [];
+
+  const monthName = new Date(`${latestMonthKey}-01T00:00:00Z`).toLocaleString(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  return [
+    {
+      id: `motm-${latestMonthKey}`,
+      category: "manager-of-month",
+      headline: `FPL Manager of the Month: ${best.teamName}, with ${bestPoints} points in ${monthName}`,
+      subtext: monthName,
+      timestamp: new Date(`${latestMonthKey}-01T00:00:00Z`).toISOString(),
+    },
+  ];
+}
+
+async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
+  const [managerRows, bootstrap, transactions] = await Promise.all([
+    fetchManagerRows(getBrowserClient()),
+    getBootstrap(),
+    getTransactions(LEAGUE_ID),
+  ]);
+
+  const managerByEntry = new Map(managerRows.map((r) => [r.fpl_entry_id, r]));
+  const elementById = new Map(bootstrap.elements.map((el) => [el.id, el]));
+  const accepted = transactions.filter((t) => t.result === "a");
+
+  // Trades show as two accepted transactions -- one per entry -- in the
+  // same gameweek where each side's element_out is the other's element_in.
+  // Everything else accepted is a straightforward waiver/free-agent swap.
+  const tradePairIds = new Set<number>();
+  const headlines: NewsHeadline[] = [];
+
+  for (const t of accepted) {
+    if (tradePairIds.has(t.id)) continue;
+    const partner = accepted.find(
+      (other) =>
+        other.id !== t.id &&
+        !tradePairIds.has(other.id) &&
+        other.event === t.event &&
+        other.entry !== t.entry &&
+        other.element_out === t.element_in &&
+        other.element_in === t.element_out
+    );
+
+    const managerA = managerByEntry.get(t.entry);
+    const playerIn = elementById.get(t.element_in);
+    const playerOut = elementById.get(t.element_out);
+    if (!managerA || !playerIn || !playerOut) continue;
+
+    if (partner) {
+      tradePairIds.add(t.id);
+      tradePairIds.add(partner.id);
+      const managerB = managerByEntry.get(partner.entry);
+      if (!managerB) continue;
+      headlines.push({
+        id: `trade-${t.id}-${partner.id}`,
+        category: "trade",
+        headline: pickTemplate(
+          [
+            `${managerA.display_name} and ${managerB.display_name} strike a deal: ${playerOut.web_name} for ${playerIn.web_name}`,
+            `Trade alert: ${managerA.display_name} sends ${playerOut.web_name} to ${managerB.display_name} for ${playerIn.web_name}`,
+          ],
+          `trade-${t.id}`
+        ),
+        subtext: `Gameweek ${t.event}`,
+        timestamp: t.added,
+      });
+    } else {
+      headlines.push({
+        id: `waiver-${t.id}`,
+        category: "waiver",
+        headline: pickTemplate(
+          [
+            `${managerA.display_name} raids the waiver wire, snags ${playerIn.web_name} (drops ${playerOut.web_name})`,
+            `${managerA.display_name} makes a move: ${playerIn.web_name} in, ${playerOut.web_name} out`,
+            `Waiver wire watch: ${managerA.display_name} picks up ${playerIn.web_name}`,
+          ],
+          `waiver-${t.id}`
+        ),
+        subtext: `Gameweek ${t.event}`,
+        timestamp: t.added,
+      });
+    }
+  }
+
+  return headlines;
+}
+
+export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
+  const [matchday, monthly, transactions] = await Promise.all([
+    getMatchdayHeadlines(),
+    getMonthlyHeadline(),
+    getTransactionHeadlines(),
+  ]);
+  return [...matchday, ...monthly, ...transactions].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
 }
 
 // ---------------------------------------------------------------------------

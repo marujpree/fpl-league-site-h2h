@@ -128,3 +128,23 @@ body {
 .pl-flip-flash {
   animation: pl-flip-flash 2s ease-out;
 }
+
+/* Slow, deliberate scroll for the news ticker -- readable, not a rushed
+   stock-ticker blur. Content is duplicated by the component so -50% is
+   exactly one full loop. */
+@keyframes pl-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.pl-ticker-track {
+  animation: pl-ticker-scroll 55s linear infinite;
+}
+
+.pl-ticker-track:hover {
+  animation-play-state: paused;
+}

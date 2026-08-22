@@ -164,6 +164,24 @@ export interface FplEntryEventResponse {
   entry_history?: { points: number; event: number };
 }
 
+// ---- /draft/league/{id}/transactions ----
+// Waiver/free-agent pickups and trades. `kind: "f"` observed for a
+// free-agent add+drop; other kinds (trades between two entries) haven't
+// been observed yet in this league's early season but the shape should be
+// the same per-entry add+drop record, just two of them sharing a gameweek
+// and near-identical timestamp.
+
+export interface FplTransaction {
+  id: number;
+  entry: number; // FPL entry_id
+  event: number;
+  element_in: number;
+  element_out: number;
+  added: string; // ISO timestamp
+  kind: string;
+  result: string; // "a" accepted, "r" rejected, "p" pending
+}
+
 // ---- Domain types ----
 // A simplified, UI-facing shape decoupled from raw API responses — the same
 // contract components/mock-data.ts already exposes, so pages don't need to
@@ -288,3 +306,14 @@ export interface PairRecord {
 }
 
 export const TOTAL_GAMEWEEKS = 38;
+
+export type NewsCategory = "biggest-loss" | "manager-of-week" | "manager-of-month" | "waiver" | "trade";
+
+export interface NewsHeadline {
+  id: string;
+  category: NewsCategory;
+  headline: string;
+  subtext?: string;
+  /** ISO timestamp used to sort the feed / ticker, newest first. */
+  timestamp: string;
+}

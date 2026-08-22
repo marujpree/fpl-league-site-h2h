@@ -2,8 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
+import NewsTicker from "@/components/NewsTicker";
 import TabNav from "@/components/TabNav";
-import { getCurrentGameweek } from "@/lib/data";
+import { getCurrentGameweek, getNewsHeadlines } from "@/lib/data";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,7 +32,7 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const gameweek = await getCurrentGameweek();
+  const [gameweek, headlines] = await Promise.all([getCurrentGameweek(), getNewsHeadlines()]);
   return (
     <html
       lang="en"
@@ -63,6 +64,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </span>
           </div>
         </header>
+        <NewsTicker headlines={headlines} />
         <TabNav />
         <main className="mx-auto w-full max-w-5xl flex-1 px-3 py-4 sm:px-6 sm:py-8">
           {children}

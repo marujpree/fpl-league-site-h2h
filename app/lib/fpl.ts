@@ -12,6 +12,7 @@ import type {
   FplFixture,
   FplGameState,
   FplLeagueDetails,
+  FplTransaction,
 } from "./fpl-types";
 
 const BASE = "https://draft.premierleague.com/api";
@@ -97,4 +98,17 @@ export async function getAllFixtures(): Promise<FplFixture[]> {
     throw new Error(`FPL fixtures API failed: ${res.status}`);
   }
   return res.json();
+}
+
+/** Waiver/free-agent pickups and trades for this league, accepted and
+ * pending alike -- caller filters by `result`/`kind`. */
+export async function getTransactions(leagueId: number): Promise<FplTransaction[]> {
+  const res = await fetch(`${BASE}/draft/league/${leagueId}/transactions`, {
+    next: { revalidate: 300 },
+  });
+  if (!res.ok) {
+    throw new Error(`FPL transactions API failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { transactions: FplTransaction[] };
+  return body.transactions ?? [];
 }

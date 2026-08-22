@@ -10,6 +10,7 @@ const TABS = [
   { href: "/pl-fixtures", label: "PL Fixtures" },
   { href: "/players", label: "Players" },
   { href: "/stats", label: "Stats" },
+  { href: "/news", label: "News" },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
