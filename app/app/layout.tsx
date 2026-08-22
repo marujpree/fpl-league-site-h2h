@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import NewsTicker from "@/components/NewsTicker";
 import TabNav from "@/components/TabNav";
-import { getCurrentGameweek, getNewsHeadlines } from "@/lib/data";
+import { getCurrentGameweek, getRecentNewsHeadlines } from "@/lib/data";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,8 +31,13 @@ export const viewport: Viewport = {
   themeColor: "#38003c",
 };
 
+const TICKER_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [gameweek, headlines] = await Promise.all([getCurrentGameweek(), getNewsHeadlines()]);
+  const [gameweek, tickerHeadlines] = await Promise.all([
+    getCurrentGameweek(),
+    getRecentNewsHeadlines(TICKER_MAX_AGE_MS),
+  ]);
   return (
     <html
       lang="en"
@@ -64,7 +69,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </span>
           </div>
         </header>
-        <NewsTicker headlines={headlines} />
+        <NewsTicker headlines={tickerHeadlines} />
         <TabNav />
         <main className="mx-auto w-full max-w-5xl flex-1 px-3 py-4 sm:px-6 sm:py-8">
           {children}

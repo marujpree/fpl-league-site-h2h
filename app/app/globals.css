@@ -96,24 +96,6 @@ body {
   animation: pl-pulse 1.6s ease-in-out infinite;
 }
 
-@keyframes pl-glow-in {
-  from {
-    text-shadow: 0 0 0 rgba(22, 163, 74, 0);
-  }
-  to {
-    text-shadow: 0 0 10px rgba(22, 163, 74, 0.55);
-  }
-}
-
-.pl-glow-win {
-  animation: pl-glow-in 0.4s ease-out forwards;
-  color: var(--win);
-}
-
-.pl-glow-loss {
-  color: var(--loss);
-}
-
 /* One-shot highlight when a live matchup's lead changes hands -- a ring
    that flashes in and fades out, not a persistent glow. */
 @keyframes pl-flip-flash {

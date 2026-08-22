@@ -75,7 +75,6 @@ function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
           <th className="w-14 px-2 py-3 text-center font-medium">W</th>
           <th className="w-14 px-2 py-3 text-center font-medium">D</th>
           <th className="w-14 px-2 py-3 text-center font-medium">L</th>
-          <th className="w-20 px-2 py-3 text-center font-medium">GW</th>
           <th className="w-20 px-3 py-3 text-right font-medium">Pts</th>
         </tr>
       </thead>
@@ -112,16 +111,6 @@ function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
               <td className="px-2 py-3 text-center text-muted">{row.wins}</td>
               <td className="px-2 py-3 text-center text-muted">{row.draws}</td>
               <td className="px-2 py-3 text-center text-muted">{row.losses}</td>
-              <td className="px-2 py-3 text-center">
-                {row.gwPoints !== undefined ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-live" aria-hidden />}
-                    <span className="text-muted">{row.gwPoints}</span>
-                  </span>
-                ) : (
-                  <span className="text-muted">-</span>
-                )}
-              </td>
               <td className="px-3 py-3 text-right text-base font-bold text-foreground">{row.points}</td>
             </tr>
           );
@@ -153,15 +142,6 @@ function StandingsCard({ row, isLive }: { row: StandingsRow; isLive: boolean }) 
           <span className="truncate font-semibold text-foreground">{row.manager.teamName}</span>
           <span className="truncate text-xs text-muted">
             {row.played}P {row.wins}W {row.draws}D {row.losses}L
-            {row.gwPoints !== undefined && (
-              <>
-                {" "}
-                &middot; GW {row.gwPoints}
-                {isLive && (
-                  <span className="pl-pulse-dot ml-1 inline-block h-1.5 w-1.5 rounded-full bg-live align-middle" aria-hidden />
-                )}
-              </>
-            )}
           </span>
         </span>
         <span className="shrink-0 text-lg font-bold text-foreground">{row.points}</span>

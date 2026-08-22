@@ -745,6 +745,16 @@ export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
   );
 }
 
+/** For the site-wide ticker, which only shows recent news -- the full
+ * history still lives on the News tab. Filtering happens here (a plain
+ * async function) rather than in a component body, since computing "now"
+ * during render is impure. */
+export async function getRecentNewsHeadlines(maxAgeMs: number): Promise<NewsHeadline[]> {
+  const headlines = await getNewsHeadlines();
+  const now = Date.now();
+  return headlines.filter((h) => now - new Date(h.timestamp).getTime() <= maxAgeMs);
+}
+
 // ---------------------------------------------------------------------------
 // Manager squad — real, current roster from FPL's own Draft API. Draft
 // leagues assign players permanently at draft time (unlike Classic's
