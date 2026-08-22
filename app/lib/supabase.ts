@@ -174,3 +174,40 @@ export async function upsertLiveScores(
   if (error) throw error;
   return payload.length;
 }
+
+// Writes permanent final scores into h2h_matches once a gameweek is
+// officially finished — server client only (RLS has no write policy for
+// h2h_matches, by design, so only /api/poll's service-role client can call
+// this). Partial-column upsert keyed on `id`, so gameweek_id/manager ids
+// on the existing rows are left untouched.
+export async function upsertMatchResults(
+  client: SupabaseClient,
+  rows: Array<Pick<H2HMatchRow, "id" | "score_1" | "score_2" | "winner_id">>
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const { error } = await client.from("h2h_matches").upsert(rows, { onConflict: "id" });
+  if (error) throw error;
+  return rows.length;
+}
+
+// Flips the finished gameweek's flags and advances `is_current` to the next
+// one (if there is one) — server client only, same reasoning as above.
+export async function markGameweekFinalized(
+  client: SupabaseClient,
+  finishedGameweekId: number,
+  nextGameweekId: number | null
+): Promise<void> {
+  const { error: finishError } = await client
+    .from("gameweeks")
+    .update({ is_finished: true, is_current: false })
+    .eq("id", finishedGameweekId);
+  if (finishError) throw finishError;
+
+  if (nextGameweekId !== null) {
+    const { error: nextError } = await client
+      .from("gameweeks")
+      .update({ is_current: true })
+      .eq("id", nextGameweekId);
+    if (nextError) throw nextError;
+  }
+}

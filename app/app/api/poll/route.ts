@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getServerClient,
   getManagers,
+  getMatchesForGameweek,
+  markGameweekFinalized,
   upsertLiveScores,
+  upsertMatchResults,
   type ManagerRow,
 } from "@/lib/supabase";
 
@@ -129,7 +133,44 @@ async function pollOnce() {
   }
 
   const managersUpdated = await upsertLiveScores(supabase, rows);
-  return { polled: true, gameweek, managersUpdated };
+
+  const finalized = game.current_event_finished
+    ? await finalizeGameweekIfNeeded(supabase, gameweek, game.next_event, rows)
+    : false;
+
+  return { polled: true, gameweek, managersUpdated, finalized };
+}
+
+/**
+ * Once FPL reports a gameweek as officially finished, this writes the final
+ * scores into `h2h_matches` (the permanent record the rest of the site
+ * reads from) and advances `gameweeks.is_current` to the next gameweek.
+ * Idempotent: no-ops if this gameweek's matches already have final scores,
+ * so it's safe to call on every poll during the finished window.
+ */
+async function finalizeGameweekIfNeeded(
+  supabase: SupabaseClient,
+  gameweek: number,
+  nextEvent: number | null,
+  scoreRows: Array<{ manager_id: string; current_points: number }>
+): Promise<boolean> {
+  const matches = await getMatchesForGameweek(supabase, gameweek);
+  if (matches.length === 0) return false;
+  const alreadyFinalized = matches.every((m) => m.score_1 !== null);
+  if (alreadyFinalized) return false;
+
+  const scoreByManager = new Map(scoreRows.map((r) => [r.manager_id, r.current_points]));
+
+  const updates = matches.map((m) => {
+    const score1 = scoreByManager.get(m.manager_1_id) ?? 0;
+    const score2 = scoreByManager.get(m.manager_2_id) ?? 0;
+    const winner_id = score1 === score2 ? null : score1 > score2 ? m.manager_1_id : m.manager_2_id;
+    return { id: m.id, score_1: score1, score_2: score2, winner_id };
+  });
+
+  await upsertMatchResults(supabase, updates);
+  await markGameweekFinalized(supabase, gameweek, nextEvent);
+  return true;
 }
 
 async function handle(request: NextRequest) {

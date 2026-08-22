@@ -30,6 +30,7 @@ import {
   getManagers as fetchManagerRows,
   getFullSchedule,
   getCurrentGameweek as fetchCurrentGameweekRow,
+  getLiveScores,
 } from "./supabase";
 
 export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, PairRecord, PlayerListEntry, RankHistoryPoint, SquadPlayer, StandingsRow };
@@ -134,13 +135,26 @@ function pairRecord(matches: H2HMatchRow[], id1: string, id2: string): PairRecor
   return record;
 }
 
-export async function getStandings(): Promise<StandingsRow[]> {
-  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+function standingsRowsFromMatches(
+  managers: Manager[],
+  matches: H2HMatchRow[],
+  gwPointsByManager: Map<string, number>
+): StandingsRow[] {
   const table = tallyFromMatches(matches, managers.map((m) => m.id));
 
   const rows = managers.map((manager) => {
     const t = table.get(manager.id)!;
-    return { manager, rank: 0, played: t.played, wins: t.wins, draws: t.draws, losses: t.losses, points: t.points, totalScored: t.totalScored };
+    return {
+      manager,
+      rank: 0,
+      played: t.played,
+      wins: t.wins,
+      draws: t.draws,
+      losses: t.losses,
+      points: t.points,
+      totalScored: t.totalScored,
+      gwPoints: gwPointsByManager.get(manager.id),
+    };
   });
 
   // Pre-season (everyone 0-0-0-0): keep a stable alphabetical order rather
@@ -148,7 +162,7 @@ export async function getStandings(): Promise<StandingsRow[]> {
   rows.sort((a, b) => b.points - a.points || b.totalScored - a.totalScored || a.manager.teamName.localeCompare(b.manager.teamName));
   rows.forEach((row, i) => (row.rank = i + 1));
 
-  return rows.map(({ manager, rank, played, wins, draws, losses, points }) => ({
+  return rows.map(({ manager, rank, played, wins, draws, losses, points, gwPoints }) => ({
     manager,
     rank,
     played,
@@ -156,7 +170,80 @@ export async function getStandings(): Promise<StandingsRow[]> {
     draws,
     losses,
     points,
+    gwPoints,
   }));
+}
+
+export async function getStandings(): Promise<StandingsRow[]> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  return standingsRowsFromMatches(managers, matches, new Map());
+}
+
+export interface LiveStandingsResult {
+  rows: StandingsRow[];
+  /** True only while the current gameweek is still in progress and these
+   * rows reflect a live projection ("if the gameweek ended right now") --
+   * not the official record yet. */
+  isLive: boolean;
+  gameweekId: number | null;
+  /** Manager ids whose `gwPoints` came from the live cache this render --
+   * drives the pulsing live-dot next to their GW column. */
+  liveManagerIds: Set<string>;
+}
+
+/**
+ * Standings for display on the homepage. While a gameweek is in progress,
+ * this blends in `live_points_cache` as a provisional "if it ended now"
+ * projection for the GW-points column and overall rank; once /api/poll's
+ * finalize step writes real scores into h2h_matches (gameweek.is_finished
+ * flips true), this naturally reads the real permanent result instead --
+ * no separate code path needed for "final" vs "live", just different data.
+ */
+export async function getLiveStandings(): Promise<LiveStandingsResult> {
+  const [managers, matches, gameweek] = await Promise.all([
+    loadManagers(),
+    loadAllMatches(),
+    getCurrentGameweek(),
+  ]);
+
+  if (!gameweek) {
+    return { rows: standingsRowsFromMatches(managers, matches, new Map()), isLive: false, gameweekId: null, liveManagerIds: new Set() };
+  }
+
+  if (gameweek.is_finished) {
+    const gwPoints = new Map<string, number>();
+    for (const m of matches) {
+      if (m.gameweek_id !== gameweek.id) continue;
+      if (m.score_1 !== null) gwPoints.set(m.manager_1_id, m.score_1);
+      if (m.score_2 !== null) gwPoints.set(m.manager_2_id, m.score_2);
+    }
+    return { rows: standingsRowsFromMatches(managers, matches, gwPoints), isLive: false, gameweekId: gameweek.id, liveManagerIds: new Set() };
+  }
+
+  const client = getBrowserClient();
+  const liveRows = await getLiveScores(client, gameweek.id);
+  const liveByManager = new Map(liveRows.map((r) => [r.manager_id, r.current_points]));
+
+  if (liveByManager.size === 0) {
+    // Nothing polled for this gameweek yet -- not "live" in any meaningful
+    // sense, just show the season standings as-is.
+    return { rows: standingsRowsFromMatches(managers, matches, new Map()), isLive: false, gameweekId: gameweek.id, liveManagerIds: new Set() };
+  }
+
+  const projectedMatches = matches.map((m) => {
+    if (m.gameweek_id !== gameweek.id) return m;
+    const s1 = liveByManager.get(m.manager_1_id);
+    const s2 = liveByManager.get(m.manager_2_id);
+    if (s1 === undefined || s2 === undefined) return m; // picks not locked yet
+    return { ...m, score_1: s1, score_2: s2 };
+  });
+
+  return {
+    rows: standingsRowsFromMatches(managers, projectedMatches, liveByManager),
+    isLive: true,
+    gameweekId: gameweek.id,
+    liveManagerIds: new Set(liveByManager.keys()),
+  };
 }
 
 // ---------------------------------------------------------------------------
