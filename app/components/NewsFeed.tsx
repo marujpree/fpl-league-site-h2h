@@ -16,6 +16,14 @@ const CATEGORY_STYLE: Record<NewsCategory, string> = {
   trade: "bg-live/10 text-live",
 };
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function NewsFeed({ headlines }: { headlines: NewsHeadline[] }) {
   if (headlines.length === 0) {
     return (
@@ -35,7 +43,10 @@ export default function NewsFeed({ headlines }: { headlines: NewsHeadline[] }) {
             >
               {CATEGORY_LABEL[item.category]}
             </span>
-            {item.subtext && <span className="text-xs text-muted">{item.subtext}</span>}
+            <span className="text-xs text-muted">
+              {item.subtext ? `${item.subtext} · ` : ""}
+              {formatDate(item.timestamp)}
+            </span>
           </div>
           <p className="text-sm font-medium leading-snug text-foreground">{item.headline}</p>
         </li>
