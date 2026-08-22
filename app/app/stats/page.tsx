@@ -1,10 +1,17 @@
 import Link from "next/link";
+import InjuryWatch from "@/components/InjuryWatch";
+import LeagueRecords from "@/components/LeagueRecords";
 import ManagerBadge from "@/components/ManagerBadge";
 import StreakBadge from "@/components/StreakBadge";
-import { getAllStreaks, getManagerOfTheWeek } from "@/lib/data";
+import { getAllStreaks, getInjuryWatch, getLeagueRecords, getManagerOfTheWeek } from "@/lib/data";
 
 export default async function StatsPage() {
-  const [motw, streaks] = await Promise.all([getManagerOfTheWeek(), getAllStreaks()]);
+  const [motw, streaks, records, injuryWatch] = await Promise.all([
+    getManagerOfTheWeek(),
+    getAllStreaks(),
+    getLeagueRecords(),
+    getInjuryWatch(),
+  ]);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
@@ -32,6 +39,16 @@ export default async function StatsPage() {
             No gameweeks finished yet. Check back once GW1 wraps up.
           </p>
         )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">League records</h2>
+        <LeagueRecords records={records} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Injury watch</h2>
+        <InjuryWatch entries={injuryWatch} />
       </section>
 
       <section className="flex flex-col gap-3">

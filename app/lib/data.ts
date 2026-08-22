@@ -734,6 +734,53 @@ async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
   return headlines;
 }
 
+export interface WaiverTrendPlayer {
+  id: number;
+  name: string;
+  club: string;
+  clubCode: number;
+  count: number;
+}
+
+export interface WaiverTrends {
+  gameweek: number | null;
+  mostAdded: WaiverTrendPlayer[];
+  mostDropped: WaiverTrendPlayer[];
+}
+
+/** Most-added / most-dropped players from the latest gameweek's accepted
+ * transactions -- reuses the same transaction feed as the News headlines. */
+export async function getWaiverTrends(): Promise<WaiverTrends> {
+  const [bootstrap, transactions] = await Promise.all([getBootstrap(), getTransactions(LEAGUE_ID)]);
+  const accepted = transactions.filter((t) => t.result === "a");
+  if (accepted.length === 0) return { gameweek: null, mostAdded: [], mostDropped: [] };
+
+  const latestGw = Math.max(...accepted.map((t) => t.event));
+  const thisWeek = accepted.filter((t) => t.event === latestGw);
+
+  const elementById = new Map(bootstrap.elements.map((el) => [el.id, el]));
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+
+  function tally(elementIds: number[]): WaiverTrendPlayer[] {
+    const counts = new Map<number, number>();
+    for (const id of elementIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const entries: WaiverTrendPlayer[] = [];
+    for (const [id, count] of counts) {
+      const el = elementById.get(id);
+      if (!el) continue;
+      const team = teamById.get(el.team);
+      entries.push({ id, name: el.web_name, club: team?.short_name ?? "?", clubCode: team?.code ?? 0, count });
+    }
+    return entries.sort((a, b) => b.count - a.count).slice(0, 5);
+  }
+
+  return {
+    gameweek: latestGw,
+    mostAdded: tally(thisWeek.map((t) => t.element_in)),
+    mostDropped: tally(thisWeek.map((t) => t.element_out)),
+  };
+}
+
 export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
   const [matchday, monthly, transactions] = await Promise.all([
     getMatchdayHeadlines(),
@@ -949,4 +996,86 @@ export async function getAllPlayers(): Promise<PlayerListEntry[]> {
       owner: ownerEntryId !== null ? managerByEntryId.get(ownerEntryId) ?? null : null,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Injury Watch (Stats page) -- every rostered player who isn't fully
+// available right now, grouped by the manager who owns them.
+// ---------------------------------------------------------------------------
+
+export interface InjuryWatchEntry {
+  manager: Manager;
+  players: PlayerListEntry[];
+}
+
+export async function getInjuryWatch(): Promise<InjuryWatchEntry[]> {
+  const players = await getAllPlayers();
+  const byManager = new Map<string, InjuryWatchEntry>();
+
+  for (const player of players) {
+    if (!player.owner || player.status === "a") continue;
+    const entry = byManager.get(player.owner.id) ?? { manager: player.owner, players: [] };
+    entry.players.push(player);
+    byManager.set(player.owner.id, entry);
+  }
+
+  return Array.from(byManager.values()).sort((a, b) => a.manager.teamName.localeCompare(b.manager.teamName));
+}
+
+// ---------------------------------------------------------------------------
+// League Records (Stats page) -- season-long superlatives, distinct from
+// the weekly Manager of the Week.
+// ---------------------------------------------------------------------------
+
+export interface LeagueRecords {
+  highestGwScore: { manager: Manager; gameweek: number; points: number } | null;
+  longestWinStreak: { manager: Manager; count: number } | null;
+  biggestBlowout: { winner: Manager; loser: Manager; margin: number; gameweek: number } | null;
+}
+
+export async function getLeagueRecords(): Promise<LeagueRecords> {
+  const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
+  const byId = new Map(managers.map((m) => [m.id, m]));
+
+  let highestGwScore: LeagueRecords["highestGwScore"] = null;
+  let biggestBlowout: LeagueRecords["biggestBlowout"] = null;
+
+  for (const m of matches) {
+    if (m.score_1 === null || m.score_2 === null) continue;
+    const candidates: [string, number][] = [
+      [m.manager_1_id, m.score_1],
+      [m.manager_2_id, m.score_2],
+    ];
+    for (const [managerId, points] of candidates) {
+      if (!highestGwScore || points > highestGwScore.points) {
+        const manager = byId.get(managerId);
+        if (manager) highestGwScore = { manager, gameweek: m.gameweek_id, points };
+      }
+    }
+
+    const margin = Math.abs(m.score_1 - m.score_2);
+    if (margin > 0 && (!biggestBlowout || margin > biggestBlowout.margin)) {
+      const winnerId = m.score_1 > m.score_2 ? m.manager_1_id : m.manager_2_id;
+      const loserId = winnerId === m.manager_1_id ? m.manager_2_id : m.manager_1_id;
+      const winner = byId.get(winnerId);
+      const loser = byId.get(loserId);
+      if (winner && loser) biggestBlowout = { winner, loser, margin, gameweek: m.gameweek_id };
+    }
+  }
+
+  let longestWinStreak: LeagueRecords["longestWinStreak"] = null;
+  for (const manager of managers) {
+    const form = await getFormGuide(manager.id);
+    let current = 0;
+    let best = 0;
+    for (const result of form) {
+      current = result.result === "W" ? current + 1 : 0;
+      best = Math.max(best, current);
+    }
+    if (best > 0 && (!longestWinStreak || best > longestWinStreak.count)) {
+      longestWinStreak = { manager, count: best };
+    }
+  }
+
+  return { highestGwScore, longestWinStreak, biggestBlowout };
 }
