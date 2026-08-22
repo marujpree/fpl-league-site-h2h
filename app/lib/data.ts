@@ -239,6 +239,10 @@ export interface PLFixtureRow {
   awayScore: number | null;
   started: boolean;
   finished: boolean;
+  /** True once the full-time whistle's blown, ahead of `finished` (which
+   * waits on bonus points being confirmed, up to ~1hr later). This is what
+   * "the match is over" should actually key off of for display purposes. */
+  finishedProvisional: boolean;
   minutes: number;
 }
 
@@ -265,6 +269,7 @@ export async function getPLFixtures(): Promise<{
       awayScore: f.team_a_score,
       started: f.started,
       finished: f.finished,
+      finishedProvisional: f.finished_provisional,
       minutes: f.minutes,
     }))
     .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());

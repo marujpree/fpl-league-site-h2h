@@ -15,21 +15,22 @@ function formatKickoff(iso: string): string {
 }
 
 export default function PLFixtureCard({ fixture }: { fixture: PLFixtureRow }) {
-  const { home, away, homeScore, awayScore, started, finished, minutes, kickoff } = fixture;
+  const { home, away, homeScore, awayScore, started, finishedProvisional, minutes, kickoff } = fixture;
   const played = homeScore !== null && awayScore !== null;
-  const isLive = started && !finished;
+  const isDone = finishedProvisional;
+  const isLive = started && !isDone;
 
-  const homeWinning = played && isLive && homeScore! > awayScore!;
-  const awayWinning = played && isLive && awayScore! > homeScore!;
+  const homeWinning = played && homeScore! > awayScore!;
+  const awayWinning = played && awayScore! > homeScore!;
 
   return (
     <div className="overflow-hidden rounded-xl border border-card-border bg-card">
       <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4 sm:pt-3">
         <span className="text-xs font-medium text-muted">{formatKickoff(kickoff)}</span>
-        {finished ? (
+        {isDone ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-win/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-win">
             <span className="h-1.5 w-1.5 rounded-full bg-win" aria-hidden />
-            Played
+            Completed
           </span>
         ) : isLive ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-live/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-live">
@@ -45,19 +46,19 @@ export default function PLFixtureCard({ fixture }: { fixture: PLFixtureRow }) {
       </div>
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
-        <TeamSide team={home} winning={homeWinning} align="right" />
+        <TeamSide team={home} align="right" />
 
         {played ? (
           <div className="flex items-center gap-1.5 px-1 text-xl font-extrabold tabular-nums sm:gap-2 sm:text-3xl">
-            <span className={homeWinning ? "pl-glow-win" : "text-foreground"}>{homeScore}</span>
+            <span className={homeWinning ? "text-win" : "text-foreground"}>{homeScore}</span>
             <span className="text-muted">&ndash;</span>
-            <span className={awayWinning ? "pl-glow-win" : "text-foreground"}>{awayScore}</span>
+            <span className={awayWinning ? "text-win" : "text-foreground"}>{awayScore}</span>
           </div>
         ) : (
           <div className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">vs</div>
         )}
 
-        <TeamSide team={away} winning={awayWinning} align="left" />
+        <TeamSide team={away} align="left" />
       </div>
     </div>
   );
@@ -65,11 +66,9 @@ export default function PLFixtureCard({ fixture }: { fixture: PLFixtureRow }) {
 
 function TeamSide({
   team,
-  winning,
   align,
 }: {
   team: PLFixtureTeam;
-  winning: boolean;
   align: "left" | "right";
 }) {
   const [badgeFailed, setBadgeFailed] = useState(false);
@@ -77,7 +76,6 @@ function TeamSide({
   return (
     <div
       className={`flex min-w-0 items-center gap-2 ${align === "right" ? "flex-row-reverse text-right" : "text-left"}`}
-      style={winning ? { filter: "drop-shadow(0 0 8px rgba(22,163,74,0.4))" } : undefined}
     >
       {badgeFailed ? (
         <span

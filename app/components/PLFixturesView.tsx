@@ -87,7 +87,7 @@ function GameweekSection({
   fixtures: PLFixtureRow[];
   isCurrent: boolean;
 }) {
-  const anyLive = fixtures.some((f) => f.started && !f.finished);
+  const anyLive = fixtures.some((f) => f.started && !f.finishedProvisional);
 
   return (
     <section className="flex flex-col gap-3">
