@@ -8,7 +8,7 @@
 
 import { getBrowserClient } from "./supabase";
 import { getManagerColor } from "@/components/manager-color";
-import { getBootstrap, getElementStatus, getEntryPicks, LEAGUE_ID } from "./fpl";
+import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, LEAGUE_ID } from "./fpl";
 import type {
   FixtureEntry,
   FormResult,
@@ -214,6 +214,59 @@ export async function getFixtures(): Promise<FixtureEntry[]> {
       };
     })
     .filter((f) => f.manager1 && f.manager2);
+}
+
+// ---------------------------------------------------------------------------
+// PL match schedule — the real Premier League fixture list (kickoff times,
+// live state, scores), separate from getFixtures() above which is this
+// league's own H2H matchup schedule.
+// ---------------------------------------------------------------------------
+
+export interface PLFixtureTeam {
+  name: string;
+  shortName: string;
+  code: number; // for clubBadgeUrl()
+}
+
+export interface PLFixtureRow {
+  id: number;
+  gameweek: number;
+  kickoff: string; // ISO timestamp
+  home: PLFixtureTeam;
+  away: PLFixtureTeam;
+  homeScore: number | null;
+  awayScore: number | null;
+  started: boolean;
+  finished: boolean;
+}
+
+export async function getPLFixtures(): Promise<{
+  fixtures: PLFixtureRow[];
+  currentGameweek: number | null;
+}> {
+  const [fixtures, bootstrap] = await Promise.all([getAllFixtures(), getBootstrap()]);
+  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
+
+  function toTeam(id: number): PLFixtureTeam {
+    const team = teamById.get(id);
+    return { name: team?.name ?? "TBD", shortName: team?.short_name ?? "TBD", code: team?.code ?? 0 };
+  }
+
+  const rows = fixtures
+    .map((f) => ({
+      id: f.id,
+      gameweek: f.event,
+      kickoff: f.kickoff_time,
+      home: toTeam(f.team_h),
+      away: toTeam(f.team_a),
+      homeScore: f.team_h_score,
+      awayScore: f.team_a_score,
+      started: f.started,
+      finished: f.finished,
+    }))
+    .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
+
+  return { fixtures: rows, currentGameweek: bootstrap.events.current };
 }
 
 // ---------------------------------------------------------------------------

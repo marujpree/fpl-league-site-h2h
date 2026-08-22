@@ -53,6 +53,7 @@ interface LiveEventResponse {
 
 interface EntryEventPick {
   element: number;
+  position: number; // 1-11 = starting XI, 12-15 = bench (see fpl-types.ts FplEntryEventPick)
   multiplier: number;
 }
 
@@ -114,6 +115,7 @@ async function pollOnce() {
 
     let total = 0;
     for (const pick of picks) {
+      if (pick.position > 11) continue; // bench doesn't count toward the score
       const elementStats = live.elements[String(pick.element)]?.stats;
       if (!elementStats) continue;
       total += elementStats.total_points * pick.multiplier;

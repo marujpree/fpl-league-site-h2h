@@ -9,11 +9,19 @@ import type {
   FplElementStatus,
   FplEntryEventPick,
   FplEventLive,
+  FplFixture,
   FplGameState,
   FplLeagueDetails,
 } from "./fpl-types";
 
 const BASE = "https://draft.premierleague.com/api";
+
+// Draft's own bootstrap-static only exposes a rolling few-gameweek window of
+// fixtures (not the full season, and finished gameweeks drop out of it), so
+// the full 380-fixture schedule with kickoff times/scores comes from classic
+// FPL's public fixtures endpoint instead. Same underlying team IDs as the
+// Draft API, so it joins cleanly against getBootstrap()'s teams list.
+const FIXTURES_BASE = "https://fantasy.premierleague.com/api";
 
 /** This dashboard is built for a single fixed league (PRD §12: single
  * season, single league, no multi-tenancy) — league 49277, "Sigma Chi FC". */
@@ -76,4 +84,17 @@ export async function getEntryPicks(
   if (!contentType.includes("application/json")) return null;
   const body = (await res.json()) as { picks?: FplEntryEventPick[] };
   return body.picks ?? null;
+}
+
+/** Full 38-gameweek Premier League fixture schedule — kickoff times, live
+ * state, and scores for all 380 matches. Poll-frequency cache since this is
+ * what shows live scorelines during a live gameweek. */
+export async function getAllFixtures(): Promise<FplFixture[]> {
+  const res = await fetch(`${FIXTURES_BASE}/fixtures/`, {
+    next: { revalidate: 60 },
+  });
+  if (!res.ok) {
+    throw new Error(`FPL fixtures API failed: ${res.status}`);
+  }
+  return res.json();
 }
