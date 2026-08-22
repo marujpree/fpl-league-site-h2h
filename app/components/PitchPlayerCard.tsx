@@ -10,8 +10,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function PitchPlayerCard({ player }: { player: LineupPlayer }) {
   const fixture = player.fixtures[0];
-  const isLive = fixture ? fixture.started && !fixture.finished : false;
-  const isDone = fixture ? fixture.finished : false;
+  const isDone = fixture ? fixture.finishedProvisional : false;
+  const isLive = fixture ? fixture.started && !isDone : false;
   const injured = player.status !== "a";
 
   return (
@@ -47,9 +47,9 @@ export default function PitchPlayerCard({ player }: { player: LineupPlayer }) {
         <span className="max-w-full truncate rounded bg-accent-strong px-1.5 py-0.5 text-[10px] font-semibold text-white">
           {player.name}
         </span>
-        <span className="flex items-center gap-1 text-[9px] font-medium text-muted">
-          {isLive && <span className="pl-pulse-dot h-1 w-1 shrink-0 rounded-full bg-live" aria-hidden />}
-          {isDone && !isLive && <span className="h-1 w-1 shrink-0 rounded-full bg-card-border" aria-hidden />}
+        <span className="flex items-center gap-1 text-[9px] font-medium text-white/90">
+          {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
+          {isDone && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-win" aria-hidden />}
           {fixture ? `${fixture.opponentShortName} (${fixture.isHome ? "H" : "A"})` : "No fixture"}
         </span>
       </div>

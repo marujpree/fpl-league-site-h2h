@@ -7,9 +7,12 @@ import type { MatchupSummary } from "@/lib/fpl-types";
 
 type MatchupCardProps = {
   matchup: MatchupSummary;
+  /** True for ~2s right after this matchup's live lead changes hands --
+   * plays a one-shot highlight ring instead of a static re-render. */
+  leadJustFlipped?: boolean;
 };
 
-export default function MatchupCard({ matchup }: MatchupCardProps) {
+export default function MatchupCard({ matchup, leadJustFlipped }: MatchupCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { manager1, manager2, score1, score2, isLive, isProvisional, headToHead } = matchup;
   const played = score1 !== undefined && score2 !== undefined;
@@ -18,7 +21,9 @@ export default function MatchupCard({ matchup }: MatchupCardProps) {
   const manager2Winning = played && isLive && score2! > score1!;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-card-border bg-card">
+    <div
+      className={`overflow-hidden rounded-xl border border-card-border bg-card ${leadJustFlipped ? "pl-flip-flash" : ""}`}
+    >
       <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4 sm:pt-3">
         <span className="text-xs font-medium uppercase tracking-wide text-muted">
           Gameweek {matchup.gameweek}

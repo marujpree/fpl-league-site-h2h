@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -19,6 +19,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sigma Chi FC",
   description: "Sigma Chi FC -- FPL Head to Head league dashboard",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Sigma Chi FC",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#38003c",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

@@ -218,6 +218,35 @@ export async function getFixtures(): Promise<FixtureEntry[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Next deadline — the soonest upcoming lineup lock / trade / waiver
+// milestone, straight from FPL's own gameweek calendar so it stays correct
+// for every future gameweek without needing to keep Supabase's `gameweeks`
+// table manually in sync 38 weeks out.
+// ---------------------------------------------------------------------------
+
+export interface UpcomingDeadline {
+  gameweek: number;
+  deadlineTime: string;
+  tradesTime: string;
+  waiversTime: string;
+}
+
+export async function getUpcomingDeadline(): Promise<UpcomingDeadline | null> {
+  const bootstrap = await getBootstrap();
+  const now = Date.now();
+  const upcoming = bootstrap.events.data
+    .filter((e) => new Date(e.deadline_time).getTime() > now)
+    .sort((a, b) => new Date(a.deadline_time).getTime() - new Date(b.deadline_time).getTime())[0];
+  if (!upcoming) return null;
+  return {
+    gameweek: upcoming.id,
+    deadlineTime: upcoming.deadline_time,
+    tradesTime: upcoming.trades_time,
+    waiversTime: upcoming.waivers_time,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // PL match schedule — the real Premier League fixture list (kickoff times,
 // live state, scores), separate from getFixtures() above which is this
 // league's own H2H matchup schedule.
@@ -512,10 +541,22 @@ export async function getManagerGameweekLineup(
     const home = teamById.get(f.team_h);
     const away = teamById.get(f.team_a);
     const homeList = fixturesByTeam.get(f.team_h) ?? [];
-    homeList.push({ opponentShortName: away?.short_name ?? "?", isHome: true, started: f.started, finished: f.finished });
+    homeList.push({
+      opponentShortName: away?.short_name ?? "?",
+      isHome: true,
+      started: f.started,
+      finished: f.finished,
+      finishedProvisional: f.finished_provisional,
+    });
     fixturesByTeam.set(f.team_h, homeList);
     const awayList = fixturesByTeam.get(f.team_a) ?? [];
-    awayList.push({ opponentShortName: home?.short_name ?? "?", isHome: false, started: f.started, finished: f.finished });
+    awayList.push({
+      opponentShortName: home?.short_name ?? "?",
+      isHome: false,
+      started: f.started,
+      finished: f.finished,
+      finishedProvisional: f.finished_provisional,
+    });
     fixturesByTeam.set(f.team_a, awayList);
   }
 

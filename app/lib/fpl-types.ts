@@ -232,6 +232,10 @@ export interface LineupFixture {
   isHome: boolean;
   started: boolean;
   finished: boolean;
+  /** True at the final whistle, ahead of `finished` (which waits on bonus
+   * points being confirmed, up to ~1hr later) -- use this for "has this
+   * player's match ended" display purposes. */
+  finishedProvisional: boolean;
 }
 
 export interface LineupPlayer extends SquadPlayer {
