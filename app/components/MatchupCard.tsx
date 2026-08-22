@@ -44,19 +44,19 @@ export default function MatchupCard({ matchup, leadJustFlipped }: MatchupCardPro
       </div>
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
-        <ScoreSide teamName={manager1.teamName} ownerName={manager1.displayName} color={manager1.accentColor} winning={manager1Winning} align="right" />
+        <ScoreSide teamName={manager1.teamName} ownerName={manager1.displayName} color={manager1.accentColor} align="right" />
 
         {played ? (
           <div className="flex items-center gap-1.5 px-1 text-xl font-extrabold tabular-nums sm:gap-2 sm:text-3xl">
-            <span className={manager1Winning ? "pl-glow-win" : "text-foreground"}>{score1}</span>
+            <span className={manager1Winning ? "text-win" : "text-foreground"}>{score1}</span>
             <span className="text-muted">&ndash;</span>
-            <span className={manager2Winning ? "pl-glow-win" : "text-foreground"}>{score2}</span>
+            <span className={manager2Winning ? "text-win" : "text-foreground"}>{score2}</span>
           </div>
         ) : (
           <div className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">vs</div>
         )}
 
-        <ScoreSide teamName={manager2.teamName} ownerName={manager2.displayName} color={manager2.accentColor} winning={manager2Winning} align="left" />
+        <ScoreSide teamName={manager2.teamName} ownerName={manager2.displayName} color={manager2.accentColor} align="left" />
       </div>
 
       <div className="flex justify-center gap-4 px-3 pb-1 text-xs sm:px-4">
@@ -98,20 +98,15 @@ function ScoreSide({
   teamName,
   ownerName,
   color,
-  winning,
   align,
 }: {
   teamName: string;
   ownerName: string;
   color: string;
-  winning: boolean;
   align: "left" | "right";
 }) {
   return (
-    <div
-      className={`flex min-w-0 flex-col ${align === "right" ? "items-end text-right" : "items-start text-left"}`}
-      style={winning ? { filter: "drop-shadow(0 0 8px rgba(22,163,74,0.4))" } : undefined}
-    >
+    <div className={`flex min-w-0 flex-col ${align === "right" ? "items-end text-right" : "items-start text-left"}`}>
       <span
         className="mb-1 h-1 w-8 rounded-full"
         style={{ backgroundColor: color }}

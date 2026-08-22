@@ -29,7 +29,7 @@ export default async function StatsPage() {
           </div>
         ) : (
           <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
-            No gameweeks finished yet — check back once GW1 wraps up.
+            No gameweeks finished yet. Check back once GW1 wraps up.
           </p>
         )}
       </section>
