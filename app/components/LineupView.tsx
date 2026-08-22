@@ -93,7 +93,8 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
 
 function PlayerRow({ player }: { player: LineupPlayer }) {
   const fixture = player.fixtures[0];
-  const isLive = fixture ? fixture.started && !fixture.finished : false;
+  const isDone = fixture ? fixture.finishedProvisional : false;
+  const isLive = fixture ? fixture.started && !isDone : false;
 
   return (
     <li className="flex items-center gap-3 bg-card px-4 py-2 text-sm">
@@ -128,6 +129,15 @@ function PlayerRow({ player }: { player: LineupPlayer }) {
         </span>
         <span className="flex items-center gap-1.5 pl-11 text-xs text-muted">
           {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
+          {isDone && (
+            <span
+              className="flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-win text-[7px] font-black leading-none text-white"
+              aria-label="Played"
+              title="Played"
+            >
+              &#10003;
+            </span>
+          )}
           {fixture ? `${fixture.opponentShortName} (${fixture.isHome ? "H" : "A"})` : "No fixture"}
         </span>
       </span>

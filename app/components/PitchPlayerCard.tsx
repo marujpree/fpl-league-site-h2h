@@ -8,11 +8,19 @@ const STATUS_LABEL: Record<string, string> = {
   u: "Unavailable",
 };
 
-export default function PitchPlayerCard({ player }: { player: LineupPlayer }) {
+type PitchPlayerCardProps = {
+  player: LineupPlayer;
+  /** False for the bench panel, whose background is light gray rather than
+   * the green pitch -- flips text color so it stays legible. */
+  onGreen?: boolean;
+};
+
+export default function PitchPlayerCard({ player, onGreen = true }: PitchPlayerCardProps) {
   const fixture = player.fixtures[0];
   const isDone = fixture ? fixture.finishedProvisional : false;
   const isLive = fixture ? fixture.started && !isDone : false;
   const injured = player.status !== "a";
+  const fixtureTextClass = onGreen ? "text-white/90" : "text-foreground";
 
   return (
     <div className="flex w-16 shrink-0 flex-col items-center gap-1 sm:w-20">
@@ -47,9 +55,17 @@ export default function PitchPlayerCard({ player }: { player: LineupPlayer }) {
         <span className="max-w-full truncate rounded bg-accent-strong px-1.5 py-0.5 text-[10px] font-semibold text-white">
           {player.name}
         </span>
-        <span className="flex items-center gap-1 text-[9px] font-medium text-white/90">
+        <span className={`flex items-center gap-1 text-[9px] font-medium ${fixtureTextClass}`}>
           {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
-          {isDone && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-win" aria-hidden />}
+          {isDone && (
+            <span
+              className="flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-white text-[7px] font-black leading-none text-win"
+              aria-label="Played"
+              title="Played"
+            >
+              &#10003;
+            </span>
+          )}
           {fixture ? `${fixture.opponentShortName} (${fixture.isHome ? "H" : "A"})` : "No fixture"}
         </span>
       </div>

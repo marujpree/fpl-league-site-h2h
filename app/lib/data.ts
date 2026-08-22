@@ -12,6 +12,7 @@ import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, getEvent
 import type {
   FixtureEntry,
   FormResult,
+  FplElement,
   FplEntryEventPick,
   GameweekLineup,
   HeadToHeadRecord,
@@ -726,7 +727,25 @@ async function getBiggestMoverHeadline(): Promise<NewsHeadline[]> {
   ];
 }
 
-async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
+interface PairedTransaction {
+  id: string;
+  kind: "waiver" | "trade";
+  managerA: ManagerRow;
+  managerB: ManagerRow | null; // set for trades only
+  playerIn: FplElement; // from managerA's side
+  playerOut: FplElement; // from managerA's side
+  gameweek: number;
+  timestamp: string;
+}
+
+/** Shared by the News headlines and the Recent Transactions feed. Trades
+ * show up as two accepted transactions -- one per entry -- in the same
+ * gameweek where each side's element_out is the other's element_in;
+ * everything else accepted is a straightforward waiver/free-agent swap.
+ * Draft leagues have exactly one owner per player at a time (unlike
+ * Classic's ownership%), so there's no "N people added this player" to
+ * tally -- each entry here is a single, attributable move. */
+async function getPairedTransactions(): Promise<PairedTransaction[]> {
   const [managerRows, bootstrap, transactions] = await Promise.all([
     fetchManagerRows(getBrowserClient()),
     getBootstrap(),
@@ -737,11 +756,8 @@ async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
   const elementById = new Map(bootstrap.elements.map((el) => [el.id, el]));
   const accepted = transactions.filter((t) => t.result === "a");
 
-  // Trades show as two accepted transactions -- one per entry -- in the
-  // same gameweek where each side's element_out is the other's element_in.
-  // Everything else accepted is a straightforward waiver/free-agent swap.
   const tradePairIds = new Set<number>();
-  const headlines: NewsHeadline[] = [];
+  const results: PairedTransaction[] = [];
 
   for (const t of accepted) {
     if (tradePairIds.has(t.id)) continue;
@@ -765,85 +781,96 @@ async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
       tradePairIds.add(partner.id);
       const managerB = managerByEntry.get(partner.entry);
       if (!managerB) continue;
-      headlines.push({
+      results.push({
         id: `trade-${t.id}-${partner.id}`,
-        category: "trade",
-        headline: pickTemplate(
-          [
-            `${managerA.display_name} and ${managerB.display_name} strike a deal: ${playerOut.web_name} for ${playerIn.web_name}`,
-            `Trade alert: ${managerA.display_name} sends ${playerOut.web_name} to ${managerB.display_name} for ${playerIn.web_name}`,
-          ],
-          `trade-${t.id}`
-        ),
-        subtext: `Gameweek ${t.event}`,
+        kind: "trade",
+        managerA,
+        managerB,
+        playerIn,
+        playerOut,
+        gameweek: t.event,
         timestamp: t.added,
       });
     } else {
-      headlines.push({
+      results.push({
         id: `waiver-${t.id}`,
-        category: "waiver",
-        headline: pickTemplate(
-          [
-            `${managerA.display_name} raids the waiver wire, snags ${playerIn.web_name} (drops ${playerOut.web_name})`,
-            `${managerA.display_name} makes a move: ${playerIn.web_name} in, ${playerOut.web_name} out`,
-            `Waiver wire watch: ${managerA.display_name} picks up ${playerIn.web_name}`,
-          ],
-          `waiver-${t.id}`
-        ),
-        subtext: `Gameweek ${t.event}`,
+        kind: "waiver",
+        managerA,
+        managerB: null,
+        playerIn,
+        playerOut,
+        gameweek: t.event,
         timestamp: t.added,
       });
     }
   }
 
-  return headlines;
+  return results;
 }
 
-export interface WaiverTrendPlayer {
-  id: number;
-  name: string;
-  club: string;
-  clubCode: number;
-  count: number;
-}
-
-export interface WaiverTrends {
-  gameweek: number | null;
-  mostAdded: WaiverTrendPlayer[];
-  mostDropped: WaiverTrendPlayer[];
-}
-
-/** Most-added / most-dropped players from the latest gameweek's accepted
- * transactions -- reuses the same transaction feed as the News headlines. */
-export async function getWaiverTrends(): Promise<WaiverTrends> {
-  const [bootstrap, transactions] = await Promise.all([getBootstrap(), getTransactions(LEAGUE_ID)]);
-  const accepted = transactions.filter((t) => t.result === "a");
-  if (accepted.length === 0) return { gameweek: null, mostAdded: [], mostDropped: [] };
-
-  const latestGw = Math.max(...accepted.map((t) => t.event));
-  const thisWeek = accepted.filter((t) => t.event === latestGw);
-
-  const elementById = new Map(bootstrap.elements.map((el) => [el.id, el]));
-  const teamById = new Map(bootstrap.teams.map((t) => [t.id, t]));
-
-  function tally(elementIds: number[]): WaiverTrendPlayer[] {
-    const counts = new Map<number, number>();
-    for (const id of elementIds) counts.set(id, (counts.get(id) ?? 0) + 1);
-    const entries: WaiverTrendPlayer[] = [];
-    for (const [id, count] of counts) {
-      const el = elementById.get(id);
-      if (!el) continue;
-      const team = teamById.get(el.team);
-      entries.push({ id, name: el.web_name, club: team?.short_name ?? "?", clubCode: team?.code ?? 0, count });
+async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
+  const paired = await getPairedTransactions();
+  return paired.map((p) => {
+    if (p.kind === "trade" && p.managerB) {
+      return {
+        id: p.id,
+        category: "trade" as const,
+        headline: pickTemplate(
+          [
+            `${p.managerA.display_name} and ${p.managerB.display_name} strike a deal: ${p.playerOut.web_name} for ${p.playerIn.web_name}`,
+            `Trade alert: ${p.managerA.display_name} sends ${p.playerOut.web_name} to ${p.managerB.display_name} for ${p.playerIn.web_name}`,
+          ],
+          p.id
+        ),
+        subtext: `Gameweek ${p.gameweek}`,
+        timestamp: p.timestamp,
+      };
     }
-    return entries.sort((a, b) => b.count - a.count).slice(0, 5);
-  }
+    return {
+      id: p.id,
+      category: "waiver" as const,
+      headline: pickTemplate(
+        [
+          `${p.managerA.display_name} raids the waiver wire, snags ${p.playerIn.web_name} (drops ${p.playerOut.web_name})`,
+          `${p.managerA.display_name} makes a move: ${p.playerIn.web_name} in, ${p.playerOut.web_name} out`,
+          `Waiver wire watch: ${p.managerA.display_name} picks up ${p.playerIn.web_name}`,
+        ],
+        p.id
+      ),
+      subtext: `Gameweek ${p.gameweek}`,
+      timestamp: p.timestamp,
+    };
+  });
+}
 
-  return {
-    gameweek: latestGw,
-    mostAdded: tally(thisWeek.map((t) => t.element_in)),
-    mostDropped: tally(thisWeek.map((t) => t.element_out)),
-  };
+export interface RecentTransaction {
+  id: string;
+  kind: "waiver" | "trade";
+  summary: string;
+  gameweek: number;
+  timestamp: string;
+}
+
+/** Reverse-chronological feed of actual moves -- who dropped/added what,
+ * and trades between two managers. Replaces a "most added" ranking, which
+ * doesn't really make sense in a Draft league: only one manager can ever
+ * own a given player at a time, so there's rarely more than one add of the
+ * same player in a week to rank in the first place. */
+export async function getRecentTransactions(limit = 15): Promise<RecentTransaction[]> {
+  const paired = await getPairedTransactions();
+  return paired
+    .map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      summary:
+        p.kind === "trade" && p.managerB
+          ? `${p.managerA.display_name} ↔ ${p.managerB.display_name}: ${p.playerOut.web_name} for ${p.playerIn.web_name}`
+          : `${p.managerA.display_name}: dropped ${p.playerOut.web_name}, added ${p.playerIn.web_name}`,
+      gameweek: p.gameweek,
+      timestamp: p.timestamp,
+    }))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------

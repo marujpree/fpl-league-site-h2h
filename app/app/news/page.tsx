@@ -1,9 +1,9 @@
 import NewsFeed from "@/components/NewsFeed";
-import WaiverTrends from "@/components/WaiverTrends";
-import { getNewsHeadlines, getWaiverTrends } from "@/lib/data";
+import RecentTransactions from "@/components/RecentTransactions";
+import { getNewsHeadlines, getRecentTransactions } from "@/lib/data";
 
 export default async function NewsPage() {
-  const [headlines, trends] = await Promise.all([getNewsHeadlines(), getWaiverTrends()]);
+  const [headlines, transactions] = await Promise.all([getNewsHeadlines(), getRecentTransactions()]);
 
   return (
     <div className="flex flex-col gap-3 sm:gap-5">
@@ -14,7 +14,7 @@ export default async function NewsPage() {
         </p>
       </div>
 
-      <WaiverTrends trends={trends} />
+      <RecentTransactions transactions={transactions} />
       <NewsFeed headlines={headlines} />
     </div>
   );

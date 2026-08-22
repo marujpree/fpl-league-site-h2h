@@ -51,7 +51,7 @@ export default function PitchView({ lineup }: { lineup: GameweekLineup }) {
         <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">Bench</p>
         <div className="flex flex-wrap justify-evenly gap-3 sm:justify-start">
           {lineup.bench.map((player) => (
-            <PitchPlayerCard key={player.id} player={player} />
+            <PitchPlayerCard key={player.id} player={player} onGreen={false} />
           ))}
         </div>
       </div>
