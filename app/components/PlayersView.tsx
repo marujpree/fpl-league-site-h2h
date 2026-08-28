@@ -141,7 +141,7 @@ export default function PlayersView({ players }: { players: PlayerListEntry[] })
 function PlayerRow({ player }: { player: PlayerListEntry }) {
   return (
     <li className="flex items-center gap-3 bg-card px-4 py-2 text-sm">
-      <PlayerAvatar photoCode={player.photoCode} position={player.position} />
+      <PlayerAvatar photoCode={player.photoCode} position={player.position} clubCode={player.clubCode} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-baseline gap-2">
           <span className="w-9 shrink-0 text-xs font-semibold uppercase text-muted">{player.position}</span>

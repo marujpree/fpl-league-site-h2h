@@ -25,7 +25,12 @@ export default function PitchPlayerCard({ player, onGreen = true }: PitchPlayerC
   return (
     <div className="flex w-16 shrink-0 flex-col items-center gap-1 sm:w-20">
       <div className="relative">
-        <PlayerAvatar photoCode={player.photoCode} position={player.position} size="lg" />
+        <PlayerAvatar
+          photoCode={player.photoCode}
+          position={player.position}
+          clubCode={player.clubCode}
+          size="lg"
+        />
 
         {injured && (
           <span

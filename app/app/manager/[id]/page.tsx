@@ -16,10 +16,11 @@ import {
   getRankHistory,
 } from "@/lib/data";
 
-export async function generateStaticParams() {
-  const managers = await getManagers();
-  return managers.map((manager) => ({ id: manager.id }));
-}
+// Rendered per request rather than prerendered. The lineup on this page
+// has to agree with the live matchup cards on /gameweek, and a cached HTML
+// snapshot of a gameweek in progress can't -- it ages while the cards keep
+// polling. LineupView takes over with its own polling from here.
+export const dynamic = "force-dynamic";
 
 export default async function ManagerProfilePage(props: PageProps<"/manager/[id]">) {
   const { id } = await props.params;
@@ -82,7 +83,12 @@ export default async function ManagerProfilePage(props: PageProps<"/manager/[id]
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           {currentGameweek ? `Gameweek ${currentGameweek.id} lineup` : "Gameweek lineup"}
         </h2>
-        <LineupView lineup={lineup} gameweek={currentGameweek?.id ?? null} />
+        <LineupView
+          lineup={lineup}
+          gameweek={currentGameweek?.id ?? null}
+          managerId={manager.id}
+          isLive={currentGameweek?.status.isLive ?? false}
+        />
       </section>
 
       <section className="flex flex-col gap-3">

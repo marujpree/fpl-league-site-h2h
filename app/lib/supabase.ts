@@ -176,38 +176,77 @@ export async function upsertLiveScores(
 }
 
 // Writes permanent final scores into h2h_matches once a gameweek is
-// officially finished — server client only (RLS has no write policy for
-// h2h_matches, by design, so only /api/poll's service-role client can call
-// this). Partial-column upsert keyed on `id`, so gameweek_id/manager ids
-// on the existing rows are left untouched.
-export async function upsertMatchResults(
+// finished — server client only (RLS has no write policy for h2h_matches,
+// by design, so only /api/poll's service-role client can call this).
+//
+// These are UPDATEs, not an upsert. An upsert here looked tidier (one round
+// trip, `onConflict: "id"`) but PostgREST compiles it to INSERT ... ON
+// CONFLICT, and the proposed insert row only carries the columns passed in
+// — so gameweek_id and both manager ids arrive NULL and the statement dies
+// on their NOT NULL constraints before conflict resolution ever happens. It
+// could never have written a score. Five rows per gameweek makes the extra
+// round trips irrelevant.
+export async function updateMatchResults(
   client: SupabaseClient,
   rows: Array<Pick<H2HMatchRow, "id" | "score_1" | "score_2" | "winner_id">>
 ): Promise<number> {
   if (rows.length === 0) return 0;
-  const { error } = await client.from("h2h_matches").upsert(rows, { onConflict: "id" });
-  if (error) throw error;
+  await Promise.all(
+    rows.map(async ({ id, score_1, score_2, winner_id }) => {
+      const { error } = await client
+        .from("h2h_matches")
+        .update({ score_1, score_2, winner_id })
+        .eq("id", id);
+      if (error) throw error;
+    })
+  );
   return rows.length;
 }
 
-// Flips the finished gameweek's flags and advances `is_current` to the next
-// one (if there is one) — server client only, same reasoning as above.
-export async function markGameweekFinalized(
-  client: SupabaseClient,
-  finishedGameweekId: number,
-  nextGameweekId: number | null
-): Promise<void> {
-  const { error: finishError } = await client
-    .from("gameweeks")
-    .update({ is_finished: true, is_current: false })
-    .eq("id", finishedGameweekId);
-  if (finishError) throw finishError;
 
-  if (nextGameweekId !== null) {
-    const { error: nextError } = await client
-      .from("gameweeks")
-      .update({ is_current: true })
-      .eq("id", nextGameweekId);
-    if (nextError) throw nextError;
-  }
+// Marks a gameweek finished. Deliberately does NOT touch `is_current` --
+// that's set separately by setCurrentGameweek() from FPL's own current
+// event, because the two aren't the same decision: several past gameweeks
+// can need finishing (backfill) while exactly one is current.
+export async function markGameweekFinished(
+  client: SupabaseClient,
+  gameweekId: number
+): Promise<void> {
+  const { error } = await client
+    .from("gameweeks")
+    .update({ is_finished: true })
+    .eq("id", gameweekId);
+  if (error) throw error;
+}
+
+// Points `is_current` at exactly one gameweek, clearing it everywhere else,
+// so the table can't drift out of sync with FPL (or end up with two current
+// gameweeks if a previous run half-failed). Server client only.
+export async function setCurrentGameweek(
+  client: SupabaseClient,
+  gameweekId: number
+): Promise<void> {
+  const { error: clearError } = await client
+    .from("gameweeks")
+    .update({ is_current: false })
+    .eq("is_current", true)
+    .neq("id", gameweekId);
+  if (clearError) throw clearError;
+
+  const { error: setError } = await client
+    .from("gameweeks")
+    .update({ is_current: true })
+    .eq("id", gameweekId);
+  if (setError) throw setError;
+}
+
+// Every gameweek row, ordered 1-38. Used to resolve deadline times for a
+// gameweek the site picked from FPL rather than from `is_current`.
+export async function getGameweeks(client: SupabaseClient): Promise<GameweekRow[]> {
+  const { data, error } = await client
+    .from("gameweeks")
+    .select("*")
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return data as GameweekRow[];
 }

@@ -4,17 +4,23 @@ import {
   getServerClient,
   getManagers,
   getMatchesForGameweek,
-  markGameweekFinalized,
+  markGameweekFinished,
+  setCurrentGameweek,
   upsertLiveScores,
-  upsertMatchResults,
+  updateMatchResults,
   type ManagerRow,
 } from "@/lib/supabase";
+import { computeManagerScores, type ManagerLiveScore } from "@/lib/live-points";
+import { completedGameweeks, gameweekStatus, resolveDisplayGameweek } from "@/lib/gameweek-state";
+import type { FplFixture } from "@/lib/fpl-types";
 
 // POST/GET /api/poll
 //
 // Pulls live gameweek points straight from FPL Draft's public API and
 // upserts them into `live_points_cache` so the frontend can show
 // "auto-updating" scores without hitting FPL directly from the browser.
+// It also promotes finished gameweeks into `h2h_matches` (the permanent
+// record) and keeps `gameweeks.is_current` pointed at the right week.
 //
 // Vercel Hobby's cron minimum is once per day (see vercel.json — that cron
 // is only a once-a-day fallback so the cache is never *totally* stale).
@@ -40,29 +46,17 @@ import {
 // x-poll-secret; there's no reason to give them the Vercel-only secret.
 
 const FPL_DRAFT_API = "https://draft.premierleague.com/api";
+const FPL_FIXTURES_API = "https://fantasy.premierleague.com/api";
+
+/** How far back to look for gameweeks that finished but were never written
+ * into h2h_matches. Covers a poller that was down for a couple of weeks
+ * without rescanning the whole season on every ping. */
+const BACKFILL_LOOKBACK = 6;
 
 interface GameState {
   current_event: number | null;
   current_event_finished: boolean;
   next_event: number | null;
-}
-
-interface LiveEventElementStats {
-  total_points: number;
-}
-
-interface LiveEventResponse {
-  elements: Record<string, { stats: LiveEventElementStats }>;
-}
-
-interface EntryEventPick {
-  element: number;
-  position: number; // 1-11 = starting XI, 12-15 = bench (see fpl-types.ts FplEntryEventPick)
-  multiplier: number;
-}
-
-interface EntryEventResponse {
-  picks: EntryEventPick[];
 }
 
 async function fetchGameState(): Promise<GameState> {
@@ -71,93 +65,90 @@ async function fetchGameState(): Promise<GameState> {
   return res.json();
 }
 
-async function fetchEventLive(eventId: number): Promise<LiveEventResponse> {
-  const res = await fetch(`${FPL_DRAFT_API}/event/${eventId}/live`, {
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`FPL /event/${eventId}/live failed: ${res.status}`);
-  }
+async function fetchAllFixtures(): Promise<FplFixture[]> {
+  const res = await fetch(`${FPL_FIXTURES_API}/fixtures/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`FPL /fixtures failed: ${res.status}`);
   return res.json();
 }
 
-async function fetchEntryPicks(
-  entryId: number,
-  eventId: number
-): Promise<EntryEventPick[] | null> {
-  const res = await fetch(`${FPL_DRAFT_API}/entry/${entryId}/event/${eventId}`, {
-    cache: "no-store",
-  });
-  // Picks 404/empty until the manager's squad is locked for this GW — that's
-  // expected pre-deadline, not an error worth failing the whole poll over.
-  if (!res.ok) return null;
-  const body = (await res.json()) as EntryEventResponse;
-  return body.picks ?? null;
-}
-
 async function pollOnce() {
-  const game = await fetchGameState();
-  const gameweek = game.current_event;
-
-  if (!gameweek) {
-    return { polled: false, gameweek, managersUpdated: 0, reason: "no current_event" };
-  }
-
-  const live = await fetchEventLive(gameweek);
+  const [game, fixtures] = await Promise.all([fetchGameState(), fetchAllFixtures()]);
   const supabase = getServerClient();
   const managers: ManagerRow[] = await getManagers(supabase);
 
-  const rows: Array<{
-    manager_id: string;
-    gameweek_id: number;
-    current_points: number;
-  }> = [];
+  // Which gameweek the site should be showing. Note this is deliberately
+  // NOT always `game.current_event`: FPL rolls that forward within minutes
+  // of the last whistle, and we hold on the previous week through its
+  // settle window so scores don't disappear mid-refresh.
+  const displayGameweek = resolveDisplayGameweek(fixtures, game.current_event, null);
 
-  for (const manager of managers) {
-    const picks = await fetchEntryPicks(manager.fpl_entry_id, gameweek);
-    if (!picks || picks.length === 0) continue;
-
-    let total = 0;
-    for (const pick of picks) {
-      if (pick.position > 11) continue; // bench doesn't count toward the score
-      const elementStats = live.elements[String(pick.element)]?.stats;
-      if (!elementStats) continue;
-      total += elementStats.total_points * pick.multiplier;
-    }
-
-    rows.push({
-      manager_id: manager.id,
-      gameweek_id: gameweek,
-      current_points: total,
-    });
+  if (displayGameweek === null) {
+    return { polled: false, gameweek: null, managersUpdated: 0, finalized: [], reason: "no current_event" };
   }
 
-  const managersUpdated = await upsertLiveScores(supabase, rows);
+  await setCurrentGameweek(supabase, displayGameweek);
 
-  const finalized = game.current_event_finished
-    ? await finalizeGameweekIfNeeded(supabase, gameweek, game.next_event, rows)
-    : false;
+  // Live cache for the gameweek on screen. Even once it's complete this
+  // keeps being refreshed until finalization writes the permanent record,
+  // so there's never a window where the page has nothing to show.
+  const scores = await computeManagerScores(managers, displayGameweek);
+  const managersUpdated = await upsertLiveScores(supabase, scores);
 
-  return { polled: true, gameweek, managersUpdated, finalized };
+  // Promote anything that's actually done. This is the piece that used to
+  // be broken: the old code only finalized `current_event` and only when
+  // `current_event_finished` was true — but FPL advances `current_event`
+  // the moment the last match ends, so `current_event_finished` always
+  // described the *new* week and the week that just finished was never
+  // written. Gameweeks stayed "live" forever and standings stayed 0-0-0.
+  const finalized: number[] = [];
+  const candidates = completedGameweeks(fixtures).filter(
+    (gw) => gw > displayGameweek - BACKFILL_LOOKBACK
+  );
+  for (const gameweek of candidates) {
+    const didFinalize = await finalizeGameweekIfNeeded(
+      supabase,
+      gameweek,
+      managers,
+      gameweek === displayGameweek ? scores : null
+    );
+    if (didFinalize) finalized.push(gameweek);
+  }
+
+  const status = gameweekStatus(fixtures, displayGameweek);
+  return {
+    polled: true,
+    gameweek: displayGameweek,
+    managersUpdated,
+    finalized,
+    matchesRemaining: status.remainingMatches + status.inPlayMatches,
+    isComplete: status.isComplete,
+  };
 }
 
 /**
- * Once FPL reports a gameweek as officially finished, this writes the final
- * scores into `h2h_matches` (the permanent record the rest of the site
- * reads from) and advances `gameweeks.is_current` to the next gameweek.
- * Idempotent: no-ops if this gameweek's matches already have final scores,
- * so it's safe to call on every poll during the finished window.
+ * Writes a completed gameweek's final scores into `h2h_matches` (the
+ * permanent record the rest of the site reads from) and flags the gameweek
+ * finished. Idempotent: no-ops if this gameweek's matches already have
+ * scores, so it's safe to call on every poll.
+ *
+ * `knownScores` lets the caller reuse the scores it just computed for the
+ * current gameweek; a backfilled past gameweek passes null and refetches.
  */
 async function finalizeGameweekIfNeeded(
   supabase: SupabaseClient,
   gameweek: number,
-  nextEvent: number | null,
-  scoreRows: Array<{ manager_id: string; current_points: number }>
+  managers: ManagerRow[],
+  knownScores: ManagerLiveScore[] | null
 ): Promise<boolean> {
   const matches = await getMatchesForGameweek(supabase, gameweek);
   if (matches.length === 0) return false;
-  const alreadyFinalized = matches.every((m) => m.score_1 !== null);
+  const alreadyFinalized = matches.every((m) => m.score_1 !== null && m.score_2 !== null);
   if (alreadyFinalized) return false;
+
+  const scoreRows = knownScores ?? (await computeManagerScores(managers, gameweek));
+  // Nobody had a locked lineup for this gameweek (e.g. it predates the
+  // league). Don't stamp a table full of 0-0 draws over it.
+  if (scoreRows.length === 0) return false;
 
   const scoreByManager = new Map(scoreRows.map((r) => [r.manager_id, r.current_points]));
 
@@ -168,9 +159,19 @@ async function finalizeGameweekIfNeeded(
     return { id: m.id, score_1: score1, score_2: score2, winner_id };
   });
 
-  await upsertMatchResults(supabase, updates);
-  await markGameweekFinalized(supabase, gameweek, nextEvent);
+  await updateMatchResults(supabase, updates);
+  await markGameweekFinished(supabase, gameweek);
   return true;
+}
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const { message, code, details, hint } = err as Record<string, unknown>;
+    const parts = [message, code, details, hint].filter(Boolean).map(String);
+    if (parts.length > 0) return parts.join(" | ");
+  }
+  return "Unknown poll error";
 }
 
 async function handle(request: NextRequest) {
@@ -190,8 +191,11 @@ async function handle(request: NextRequest) {
     const result = await pollOnce();
     return NextResponse.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown poll error";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // Supabase throws plain `{ message, code, details, hint }` objects, not
+    // Errors, so an `instanceof Error` check alone reduces every database
+    // failure on this route to an unactionable "Unknown poll error".
+    console.error("[poll] failed", err);
+    return NextResponse.json({ error: describeError(err) }, { status: 502 });
   }
 }
 

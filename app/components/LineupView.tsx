@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PitchView from "./PitchView";
 import PlayerAvatar from "./PlayerAvatar";
 import { clubBadgeUrl } from "@/lib/player-images";
@@ -13,8 +13,57 @@ const STATUS_LABEL: Record<string, string> = {
   u: "Unavailable",
 };
 
-export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineup | null; gameweek: number | null }) {
+const POLL_INTERVAL_MS = 60_000;
+
+type LineupViewProps = {
+  lineup: GameweekLineup | null;
+  gameweek: number | null;
+  /** Manager slug -- needed to re-fetch this lineup while the gameweek is
+   * being played. */
+  managerId: string;
+  /** Only poll while matches are actually being played. */
+  isLive: boolean;
+};
+
+export default function LineupView({ lineup, gameweek, managerId, isLive }: LineupViewProps) {
   const [view, setView] = useState<"pitch" | "list">("pitch");
+  const [polled, setPolled] = useState<GameweekLineup | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Same cadence as the matchup cards on the gameweek page, hitting an
+  // endpoint that shares their scoring code -- so the total here and the
+  // total there stay in step instead of drifting apart as this page's
+  // server render aged.
+  useEffect(() => {
+    if (!gameweek || !isLive) return;
+
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const res = await fetch(
+          `/api/lineup?manager=${encodeURIComponent(managerId)}&gameweek=${gameweek}`,
+          { cache: "no-store" }
+        );
+        if (!res.ok || cancelled) return;
+        const data: { lineup: GameweekLineup | null } = await res.json();
+        if (cancelled || !data.lineup) return;
+        setPolled(data.lineup);
+        setLastUpdated(new Date());
+      } catch {
+        // Network hiccup -- the next tick retries. Keep showing what we have.
+      }
+    }
+
+    poll();
+    const id = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [managerId, gameweek, isLive]);
+
+  const current = polled ?? lineup;
 
   if (!gameweek) {
     return (
@@ -24,7 +73,7 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
     );
   }
 
-  if (!lineup) {
+  if (!current) {
     return (
       <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
         Lineup for Gameweek {gameweek} isn&apos;t locked in yet — check back after the deadline.
@@ -34,9 +83,15 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col items-center gap-3 rounded-xl bg-accent-strong px-6 py-4 text-center">
-        <p className="text-xs font-semibold uppercase tracking-wide text-white/70">Latest Points</p>
-        <p className="text-4xl font-extrabold tabular-nums text-white">{lineup.totalPoints}</p>
+      <div className="flex flex-col items-center gap-2 rounded-xl bg-accent-strong px-6 py-4 text-center">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-white/70">
+          {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-white" aria-hidden />}
+          {isLive ? "Live Points" : "Final Points"}
+        </p>
+        <p className="text-4xl font-extrabold tabular-nums text-white">{current.totalPoints}</p>
+        {lastUpdated && (
+          <p className="text-[10px] text-white/60">Updated {lastUpdated.toLocaleTimeString()}</p>
+        )}
       </div>
 
       <div className="flex gap-1 rounded-lg border border-card-border bg-background-elevated p-1">
@@ -61,7 +116,7 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
       </div>
 
       {view === "pitch" ? (
-        <PitchView lineup={lineup} />
+        <PitchView lineup={current} />
       ) : (
         <div className="flex flex-col gap-3">
           <div className="overflow-hidden rounded-xl border border-card-border">
@@ -69,7 +124,7 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
               Starting XI
             </div>
             <ul className="divide-y divide-card-border">
-              {lineup.starting.map((player) => (
+              {current.starting.map((player) => (
                 <PlayerRow key={player.id} player={player} />
               ))}
             </ul>
@@ -80,7 +135,7 @@ export default function LineupView({ lineup, gameweek }: { lineup: GameweekLineu
               Bench
             </div>
             <ul className="divide-y divide-card-border">
-              {lineup.bench.map((player) => (
+              {current.bench.map((player) => (
                 <PlayerRow key={player.id} player={player} />
               ))}
             </ul>
@@ -98,7 +153,7 @@ function PlayerRow({ player }: { player: LineupPlayer }) {
 
   return (
     <li className="flex items-center gap-3 bg-card px-4 py-2 text-sm">
-      <PlayerAvatar photoCode={player.photoCode} position={player.position} />
+      <PlayerAvatar photoCode={player.photoCode} position={player.position} clubCode={player.clubCode} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-baseline gap-2">
           <span className="w-9 shrink-0 text-xs font-semibold uppercase text-muted">{player.position}</span>

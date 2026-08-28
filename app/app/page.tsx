@@ -1,4 +1,5 @@
 import DeadlineCountdown from "@/components/DeadlineCountdown";
+import GameweekProgress from "@/components/GameweekProgress";
 import StandingsTable from "@/components/StandingsTable";
 import { getCurrentGameweek, getLiveStandings, getUpcomingDeadline } from "@/lib/data";
 
@@ -19,10 +20,12 @@ export default async function StandingsPage() {
         </h1>
         <p className="text-sm text-muted">
           {gameweek
-            ? `Gameweek ${gameweek.id}${gameweek.is_finished ? " complete" : gameweek.deadline_time ? ` · deadline ${new Date(gameweek.deadline_time).toLocaleString()}` : ""}`
+            ? `Gameweek ${gameweek.id}${gameweek.status.isComplete ? " complete" : ""}`
             : "Season hasn't started yet"}
         </p>
       </div>
+
+      {gameweek && <GameweekProgress status={gameweek.status} />}
 
       {isLive && (
         <p className="flex items-center gap-1.5 rounded-lg bg-live/10 px-3 py-2 text-xs font-medium text-live">

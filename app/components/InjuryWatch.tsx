@@ -34,7 +34,7 @@ export default function InjuryWatch({ entries }: { entries: InjuryWatchEntry[] }
             <ul className="flex flex-col gap-2">
               {players.map((player) => (
                 <li key={player.id} className="flex items-center gap-2.5 pl-4">
-                  <PlayerAvatar photoCode={player.photoCode} position={player.position} />
+                  <PlayerAvatar photoCode={player.photoCode} position={player.position} clubCode={player.clubCode} />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">{player.name}</span>
                   <span className="shrink-0 rounded-full bg-loss/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-loss">
                     {STATUS_LABEL[player.status] ?? player.status}

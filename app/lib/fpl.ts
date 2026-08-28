@@ -7,8 +7,6 @@
 import type {
   FplBootstrap,
   FplElementStatus,
-  FplEntryEventPick,
-  FplEventLive,
   FplFixture,
   FplGameState,
   FplLeagueDetails,
@@ -62,30 +60,10 @@ export function getGameState(): Promise<FplGameState> {
   return getJson<FplGameState>(`/game`, 60);
 }
 
-/** Per-player live stats for one gameweek. Poll frequently during a live GW. */
-export function getEventLive(gameweek: number): Promise<FplEventLive> {
-  return getJson<FplEventLive>(`/event/${gameweek}/live`, 60);
-}
-
-/**
- * A manager's squad + multipliers for one gameweek. Returns `null` before
- * that manager has ever had a squad locked for this GW — the API answers
- * with the literal string "No pick history" (not JSON) in that case, which
- * is expected/normal pre-deadline, not an error.
- */
-export async function getEntryPicks(
-  entryId: number,
-  gameweek: number
-): Promise<FplEntryEventPick[] | null> {
-  const res = await fetch(`${BASE}/entry/${entryId}/event/${gameweek}`, {
-    next: { revalidate: 60 },
-  });
-  if (!res.ok) return null;
-  const contentType = res.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) return null;
-  const body = (await res.json()) as { picks?: FplEntryEventPick[] };
-  return body.picks ?? null;
-}
+// Per-player live stats and per-manager picks deliberately do NOT live
+// here: they're the numbers that have to agree between the matchup cards
+// and a manager's own page, so they go through lib/live-points.ts, which
+// fetches them uncached and does the scoring arithmetic in one place.
 
 /** Full 38-gameweek Premier League fixture schedule — kickoff times, live
  * state, and scores for all 380 matches. Poll-frequency cache since this is

@@ -1,3 +1,4 @@
+import GameweekProgress from "@/components/GameweekProgress";
 import LiveGameweekView from "@/components/LiveGameweekView";
 import { getCurrentGameweek, getCurrentGameweekMatchups } from "@/lib/data";
 
@@ -11,9 +12,13 @@ export default async function GameweekPage() {
           This Gameweek
         </h1>
         <p className="text-sm text-muted">
-          {gameweek ? `Gameweek ${gameweek.id} matchups` : "Season hasn't started yet"}
+          {gameweek
+            ? `Gameweek ${gameweek.id} matchups${gameweek.status.isComplete ? " · completed" : ""}`
+            : "Season hasn't started yet"}
         </p>
       </div>
+
+      {gameweek && <GameweekProgress status={gameweek.status} />}
 
       {matchups.length === 0 ? (
         <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
@@ -23,7 +28,7 @@ export default async function GameweekPage() {
         <LiveGameweekView
           matchups={matchups}
           gameweekId={gameweek?.id ?? null}
-          gameweekFinished={gameweek?.is_finished ?? false}
+          gameweekFinished={gameweek?.status.isComplete ?? false}
         />
       )}
     </div>

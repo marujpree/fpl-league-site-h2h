@@ -66,7 +66,7 @@ export default function StandingsTable({ rows, liveManagerIds }: StandingsTableP
 
 function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
   return (
-    <table className="w-full min-w-[420px] border-collapse text-sm">
+    <table className="w-full min-w-[470px] border-collapse text-sm">
       <thead>
         <tr className="bg-background-elevated text-left text-xs uppercase tracking-wide text-muted">
           <th className="w-12 px-3 py-3 font-medium">#</th>
@@ -75,7 +75,12 @@ function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
           <th className="w-14 px-2 py-3 text-center font-medium">W</th>
           <th className="w-14 px-2 py-3 text-center font-medium">D</th>
           <th className="w-14 px-2 py-3 text-center font-medium">L</th>
-          <th className="w-20 px-3 py-3 text-right font-medium">Pts</th>
+          <th className="w-16 px-2 py-3 text-right font-medium" title="Overall FPL points scored this season">
+            OVR
+          </th>
+          <th className="w-20 px-3 py-3 text-right font-medium" title="League points (3 for a win, 1 for a draw)">
+            Pts
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -111,6 +116,7 @@ function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
               <td className="px-2 py-3 text-center text-muted">{row.wins}</td>
               <td className="px-2 py-3 text-center text-muted">{row.draws}</td>
               <td className="px-2 py-3 text-center text-muted">{row.losses}</td>
+              <td className="px-2 py-3 text-right tabular-nums text-muted">{row.totalScored}</td>
               <td className="px-3 py-3 text-right text-base font-bold text-foreground">{row.points}</td>
             </tr>
           );
@@ -141,7 +147,7 @@ function StandingsCard({ row, isLive }: { row: StandingsRow; isLive: boolean }) 
         <span className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className="truncate font-semibold text-foreground">{row.manager.teamName}</span>
           <span className="truncate text-xs text-muted">
-            {row.played}P {row.wins}W {row.draws}D {row.losses}L
+            {row.played}P {row.wins}W {row.draws}D {row.losses}L &middot; {row.totalScored} ovr
           </span>
         </span>
         <span className="shrink-0 text-lg font-bold text-foreground">{row.points}</span>

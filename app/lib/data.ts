@@ -8,7 +8,9 @@
 
 import { getBrowserClient } from "./supabase";
 import { getManagerColor } from "@/components/manager-color";
-import { getAllFixtures, getBootstrap, getElementStatus, getEntryPicks, getEventLive, getTransactions, LEAGUE_ID } from "./fpl";
+import { getAllFixtures, getBootstrap, getElementStatus, getGameState, getTransactions, LEAGUE_ID } from "./fpl";
+import { computeManagerScores, fetchLivePointsByElement, fetchPicks, startingXiTotal } from "./live-points";
+import { gameweekStatus, resolveDisplayGameweek, type GameweekStatus } from "./gameweek-state";
 import type {
   FixtureEntry,
   FormResult,
@@ -31,11 +33,12 @@ import type { H2HMatchRow, ManagerRow, GameweekRow } from "./supabase";
 import {
   getManagers as fetchManagerRows,
   getFullSchedule,
-  getCurrentGameweek as fetchCurrentGameweekRow,
+  getGameweeks as fetchGameweekRows,
   getLiveScores,
 } from "./supabase";
 
 export type { FixtureEntry, FormResult, GameweekLineup, HeadToHeadRecord, LineupPlayer, Manager, MatchupSummary, NewsHeadline, PairRecord, PlayerListEntry, RankHistoryPoint, SquadPlayer, StandingsRow };
+export type { GameweekStatus } from "./gameweek-state";
 export { TOTAL_GAMEWEEKS } from "./fpl-types";
 
 function toManager(row: ManagerRow): Manager {
@@ -72,9 +75,46 @@ export async function getManagerById(id: string): Promise<Manager | undefined> {
   return managers.find((m) => m.id === id);
 }
 
-export async function getCurrentGameweek(): Promise<GameweekRow | null> {
+/** The gameweek row plus the fixture-derived truth about whether it's
+ * actually still being played -- see lib/gameweek-state.ts for why the
+ * database flag and FPL's own flags can't be trusted on their own. */
+export interface CurrentGameweek extends GameweekRow {
+  status: GameweekStatus;
+}
+
+/**
+ * Which gameweek the whole site is looking at, and whether it's finished.
+ *
+ * `gameweeks.is_current` / `gameweeks.is_finished` in Supabase are written
+ * by /api/poll and are only as fresh as the last poll -- if the poller is
+ * down or lagging they go stale, and every page keys off them, so a stale
+ * flag showed a week-old gameweek as permanently "Live". This reconciles
+ * the stored row against FPL's live game state and the real PL fixture
+ * list, so the site is right even when the poller isn't.
+ */
+export async function getCurrentGameweek(): Promise<CurrentGameweek | null> {
   const client = getBrowserClient();
-  return fetchCurrentGameweekRow(client);
+  const [rows, game, fixtures] = await Promise.all([
+    fetchGameweekRows(client),
+    getGameState().catch(() => null),
+    getAllFixtures().catch(() => [] as Awaited<ReturnType<typeof getAllFixtures>>),
+  ]);
+
+  const storedCurrent = rows.find((r) => r.is_current)?.id ?? null;
+  const id = resolveDisplayGameweek(fixtures, game?.current_event ?? null, storedCurrent);
+  if (id === null) return null;
+
+  const status = gameweekStatus(fixtures, id);
+  const row = rows.find((r) => r.id === id);
+  return {
+    id,
+    deadline_time: row?.deadline_time ?? null,
+    is_current: true,
+    // Fixtures, not the stored flag: a gameweek is over when its matches
+    // are over, regardless of whether anything has written that down yet.
+    is_finished: status.isComplete,
+    status,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +204,7 @@ function standingsRowsFromMatches(
   rows.sort((a, b) => b.points - a.points || b.totalScored - a.totalScored || a.manager.teamName.localeCompare(b.manager.teamName));
   rows.forEach((row, i) => (row.rank = i + 1));
 
-  return rows.map(({ manager, rank, played, wins, draws, losses, points, gwPoints }) => ({
+  return rows.map(({ manager, rank, played, wins, draws, losses, points, totalScored, gwPoints }) => ({
     manager,
     rank,
     played,
@@ -172,6 +212,9 @@ function standingsRowsFromMatches(
     draws,
     losses,
     points,
+    // FPL points scored across the season -- the "overall" column, and the
+    // tiebreaker the sort above already uses.
+    totalScored,
     gwPoints,
   }));
 }
@@ -179,6 +222,42 @@ function standingsRowsFromMatches(
 export async function getStandings(): Promise<StandingsRow[]> {
   const [managers, matches] = await Promise.all([loadManagers(), loadAllMatches()]);
   return standingsRowsFromMatches(managers, matches, new Map());
+}
+
+/** How old `live_points_cache` may be before pages stop trusting it. The
+ * poller refreshes it about once a minute; well past that and it's more
+ * likely the poller is down than that nothing has happened. */
+const LIVE_CACHE_STALE_MS = 3 * 60 * 1000;
+
+/**
+ * Every manager's points for one gameweek, for display.
+ *
+ * Prefers `live_points_cache` (cheap, one Supabase read) but falls back to
+ * computing the scores from FPL when that cache is missing or stale, so a
+ * dead poller degrades into "slightly more work per render" instead of
+ * "the whole site quietly shows week-old numbers". Same fallback as
+ * /api/live, so the server-rendered standings and the client-polled matchup
+ * cards can't disagree about what a manager is on.
+ */
+async function loadGameweekScores(gameweekId: number): Promise<Map<string, number>> {
+  const client = getBrowserClient();
+  const cached = await getLiveScores(client, gameweekId);
+  const newest = cached.reduce((max, row) => Math.max(max, new Date(row.last_updated).getTime()), 0);
+  if (cached.length > 0 && Date.now() - newest < LIVE_CACHE_STALE_MS) {
+    return new Map(cached.map((r) => [r.manager_id, r.current_points]));
+  }
+
+  try {
+    const managerRows = await fetchManagerRows(client);
+    // Revalidate rather than no-store: these pages are allowed to be
+    // statically generated, and `no-store` here would force every one of
+    // them dynamic.
+    const scores = await computeManagerScores(managerRows, gameweekId, { revalidateSeconds: 60 });
+    if (scores.length > 0) return new Map(scores.map((r) => [r.manager_id, r.current_points]));
+  } catch {
+    // FPL unreachable -- a stale cache still beats an empty table.
+  }
+  return new Map(cached.map((r) => [r.manager_id, r.current_points]));
 }
 
 export interface LiveStandingsResult {
@@ -212,39 +291,37 @@ export async function getLiveStandings(): Promise<LiveStandingsResult> {
     return { rows: standingsRowsFromMatches(managers, matches, new Map()), isLive: false, gameweekId: null, liveManagerIds: new Set() };
   }
 
-  if (gameweek.is_finished) {
-    const gwPoints = new Map<string, number>();
-    for (const m of matches) {
-      if (m.gameweek_id !== gameweek.id) continue;
-      if (m.score_1 !== null) gwPoints.set(m.manager_1_id, m.score_1);
-      if (m.score_2 !== null) gwPoints.set(m.manager_2_id, m.score_2);
-    }
-    return { rows: standingsRowsFromMatches(managers, matches, gwPoints), isLive: false, gameweekId: gameweek.id, liveManagerIds: new Set() };
-  }
+  const liveByManager = await loadGameweekScores(gameweek.id);
 
-  const client = getBrowserClient();
-  const liveRows = await getLiveScores(client, gameweek.id);
-  const liveByManager = new Map(liveRows.map((r) => [r.manager_id, r.current_points]));
-
-  if (liveByManager.size === 0) {
-    // Nothing polled for this gameweek yet -- not "live" in any meaningful
-    // sense, just show the season standings as-is.
-    return { rows: standingsRowsFromMatches(managers, matches, new Map()), isLive: false, gameweekId: gameweek.id, liveManagerIds: new Set() };
-  }
-
+  // One projection path for both live and finished gameweeks. Permanent
+  // scores in h2h_matches always win; the live cache only fills in matches
+  // that haven't been finalized yet. That means a gameweek whose matches
+  // have all been played still counts toward the table even if /api/poll
+  // hasn't written the permanent record yet -- it just stops being labelled
+  // "live" once the fixtures say it's over.
   const projectedMatches = matches.map((m) => {
     if (m.gameweek_id !== gameweek.id) return m;
+    if (m.score_1 !== null && m.score_2 !== null) return m; // already final
     const s1 = liveByManager.get(m.manager_1_id);
     const s2 = liveByManager.get(m.manager_2_id);
     if (s1 === undefined || s2 === undefined) return m; // picks not locked yet
     return { ...m, score_1: s1, score_2: s2 };
   });
 
+  const gwPoints = new Map<string, number>();
+  for (const m of projectedMatches) {
+    if (m.gameweek_id !== gameweek.id) continue;
+    if (m.score_1 !== null) gwPoints.set(m.manager_1_id, m.score_1);
+    if (m.score_2 !== null) gwPoints.set(m.manager_2_id, m.score_2);
+  }
+
+  const isLive = gameweek.status.isLive && gwPoints.size > 0;
+
   return {
-    rows: standingsRowsFromMatches(managers, projectedMatches, liveByManager),
-    isLive: true,
+    rows: standingsRowsFromMatches(managers, projectedMatches, gwPoints),
+    isLive,
     gameweekId: gameweek.id,
-    liveManagerIds: new Set(liveByManager.keys()),
+    liveManagerIds: isLive ? new Set(liveByManager.keys()) : new Set(),
   };
 }
 
@@ -260,23 +337,40 @@ export async function getCurrentGameweekMatchups(): Promise<MatchupSummary[]> {
   ]);
   if (!gameweek) return [];
 
+  // Blend live scores in server-side rather than leaving the first paint
+  // showing "vs" until the client's first poll lands -- that gap was one of
+  // the ways this page and a manager's own page could disagree.
+  const liveByManager = await loadGameweekScores(gameweek.id);
+
   const byId = new Map(managers.map((m) => [m.id, m]));
   return matches
     .filter((m) => m.gameweek_id === gameweek.id)
     .map((m) => {
-      const played = m.score_1 !== null && m.score_2 !== null;
+      const score1 = m.score_1 ?? liveByManager.get(m.manager_1_id);
+      const score2 = m.score_2 ?? liveByManager.get(m.manager_2_id);
+      const played = score1 !== undefined && score2 !== undefined;
       return {
         gameweek: gameweek.id,
         manager1: byId.get(m.manager_1_id)!,
         manager2: byId.get(m.manager_2_id)!,
-        score1: m.score_1 ?? undefined,
-        score2: m.score_2 ?? undefined,
-        isLive: played && !gameweek.is_finished,
-        isProvisional: played && !gameweek.is_finished,
+        score1,
+        score2,
+        // Driven by the real fixture list now, so these switch off ~30
+        // minutes after the gameweek's last match instead of hanging around
+        // until FPL gets round to flipping its own finished flag.
+        isLive: played && gameweek.status.isLive,
+        isProvisional: played && gameweek.status.isLive,
         headToHead: pairRecord(matches, m.manager_1_id, m.manager_2_id),
       };
     })
     .filter((m) => m.manager1 && m.manager2);
+}
+
+/** Fixture-level progress through the gameweek on screen -- "3 of 10
+ * matches still to play". */
+export async function getCurrentGameweekStatus(): Promise<GameweekStatus | null> {
+  const gameweek = await getCurrentGameweek();
+  return gameweek?.status ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,8 +392,8 @@ export async function getFixtures(): Promise<FixtureEntry[]> {
         score1: m.score_1 ?? undefined,
         score2: m.score_2 ?? undefined,
         played,
-        isLive: played && isCurrentGw && !gameweek!.is_finished,
-        isProvisional: played && isCurrentGw && !gameweek!.is_finished,
+        isLive: played && isCurrentGw && gameweek!.status.isLive,
+        isProvisional: played && isCurrentGw && gameweek!.status.isLive,
         headToHead: pairRecord(matches, m.manager_1_id, m.manager_2_id),
       };
     })
@@ -988,10 +1082,15 @@ export async function getManagerGameweekLineup(
   const managerRow = managerRows.find((m) => m.id === managerId);
   if (!managerRow) return null;
 
-  const [picks, bootstrap, live, allFixtures] = await Promise.all([
-    getEntryPicks(managerRow.fpl_entry_id, gameweek),
+  // Picks and live points come from lib/live-points.ts -- the same
+  // uncached fetches and the same arithmetic /api/poll uses to write the
+  // score on the matchup cards. Previously this path had its own copy of
+  // the math reading its own 60s-cached snapshot, which is why the two
+  // screens could show different totals for the same manager.
+  const [picks, livePoints, bootstrap, allFixtures] = await Promise.all([
+    fetchPicks(managerRow.fpl_entry_id, gameweek),
+    fetchLivePointsByElement(gameweek),
     getBootstrap(),
-    getEventLive(gameweek),
     getAllFixtures(),
   ]);
   if (!picks) return null;
@@ -1032,7 +1131,7 @@ export async function getManagerGameweekLineup(
   function toLineupPlayer(pick: FplEntryEventPick): LineupPlayer | null {
     const el = elementById.get(pick.element);
     if (!el) return null;
-    const liveStats = live.elements[String(el.id)]?.stats;
+    const rawPoints = livePoints.get(el.id) ?? 0;
     return {
       id: el.id,
       name: el.web_name,
@@ -1045,7 +1144,7 @@ export async function getManagerGameweekLineup(
       clubCode: teamById.get(el.team)?.code ?? 0,
       isCaptain: pick.is_captain,
       isViceCaptain: pick.is_vice_captain,
-      livePoints: (liveStats?.total_points ?? 0) * pick.multiplier,
+      livePoints: rawPoints * pick.multiplier,
       fixtures: fixturesByTeam.get(el.team) ?? [],
     };
   }
@@ -1067,9 +1166,7 @@ export async function getManagerGameweekLineup(
     .filter((p): p is LineupPlayer => p !== null)
     .sort(byPositionThenPoints);
 
-  const totalPoints = starting.reduce((sum, p) => sum + p.livePoints, 0);
-
-  return { starting, bench, totalPoints };
+  return { starting, bench, totalPoints: startingXiTotal(picks, livePoints) };
 }
 
 // ---------------------------------------------------------------------------

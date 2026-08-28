@@ -207,7 +207,11 @@ export interface StandingsRow {
   wins: number;
   draws: number;
   losses: number;
+  /** League points: 3 for a win, 1 for a draw. */
   points: number;
+  /** Overall FPL points scored across the season -- the "points for" total
+   * that also breaks ties on `points`. */
+  totalScored: number;
   gwPoints?: number;
 }
 
