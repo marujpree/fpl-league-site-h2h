@@ -16,6 +16,7 @@ import type {
   FormResult,
   FplElement,
   FplEntryEventPick,
+  FplFixture,
   GameweekLineup,
   HeadToHeadRecord,
   LineupFixture,
@@ -652,16 +653,54 @@ function pickTemplate(templates: string[], seed: string): string {
   return templates[Math.abs(hash) % templates.length];
 }
 
+/** When a gameweek's result actually became known: the last whistle plus the
+ * settle window that confirms bonus points, straight from the fixture list.
+ *
+ * Emphatically not the gameweek's deadline, which is where these headlines
+ * used to be dated. The deadline is when lineups *lock* -- before a ball is
+ * kicked -- so "Manager of the Week, Gameweek 3" came out stamped Sep 4
+ * while GW3 wasn't decided until Sep 6, reading as though the result were
+ * known two days before the matches were played. It also quietly broke the
+ * 48-hour news ticker: a just-decided gameweek's headline was already two
+ * days "old" the moment it was generated, so it aged out before anyone saw
+ * it. Falls back to the deadline only when the fixture list is unavailable.
+ */
+function gameweekResultTime(
+  fixtures: FplFixture[],
+  gameweek: number,
+  fallback: string | undefined
+): string {
+  const completesAt = fixtures.length > 0 ? gameweekStatus(fixtures, gameweek).completesAt : null;
+  return completesAt ?? fallback ?? new Date().toISOString();
+}
+
+/** Gameweeks with a final score written down *and* confirmed over by the
+ * fixture list. The two should never disagree -- results are only written
+ * once a gameweek completes -- but a headline crowning a winner mid-play is
+ * the one failure worth being paranoid about, so it's checked rather than
+ * assumed. Skipped entirely if the fixture list didn't load, so a flaky FPL
+ * call degrades to the old behaviour instead of blanking the news page. */
+function decidedGameweeks(matches: H2HMatchRow[], fixtures: FplFixture[]): number[] {
+  const scored = new Set(
+    matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id)
+  );
+  if (fixtures.length === 0) return [...scored].sort((a, b) => a - b);
+  return [...scored].filter((gw) => gameweekStatus(fixtures, gw).isComplete).sort((a, b) => a - b);
+}
+
 async function getMatchdayHeadlines(): Promise<NewsHeadline[]> {
-  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const [managers, matches, bootstrap, fixtures] = await Promise.all([
+    loadManagers(),
+    loadAllMatches(),
+    getBootstrap(),
+    getAllFixtures().catch(() => [] as FplFixture[]),
+  ]);
   const byId = new Map(managers.map((m) => [m.id, m]));
   const deadlineByGw = new Map(bootstrap.events.data.map((e) => [e.id, e.deadline_time]));
 
-  const playedGws = Array.from(
-    new Set(matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id))
-  );
+  const playedGws = decidedGameweeks(matches, fixtures);
   if (playedGws.length === 0) return [];
-  const latestGw = Math.max(...playedGws);
+  const latestGw = playedGws[playedGws.length - 1];
 
   let biggest: { match: H2HMatchRow; margin: number } | null = null;
   for (const m of matches) {
@@ -678,7 +717,7 @@ async function getMatchdayHeadlines(): Promise<NewsHeadline[]> {
   const loser = byId.get(loserId);
   if (!winner || !loser) return [];
 
-  const timestamp = deadlineByGw.get(latestGw) ?? new Date().toISOString();
+  const timestamp = gameweekResultTime(fixtures, latestGw, deadlineByGw.get(latestGw));
 
   const winHeadline = pickTemplate(
     [
@@ -707,8 +746,14 @@ async function getMatchdayHeadlines(): Promise<NewsHeadline[]> {
  * calendar month of gameweeks, so it doesn't flicker on mid-month and
  * doesn't need any "have I shown this already" state. */
 async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
-  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const [managers, matches, bootstrap, fixtures] = await Promise.all([
+    loadManagers(),
+    loadAllMatches(),
+    getBootstrap(),
+    getAllFixtures().catch(() => [] as FplFixture[]),
+  ]);
   const byId = new Map(managers.map((m) => [m.id, m]));
+  const deadlineByGw = new Map(bootstrap.events.data.map((e) => [e.id, e.deadline_time]));
 
   const monthKey = (iso: string) => iso.slice(0, 7); // "2026-08"
   const gwsByMonth = new Map<string, number[]>();
@@ -757,7 +802,15 @@ async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
       category: "manager-of-month",
       headline: `FPL Manager of the Month: ${best.teamName}, with ${bestPoints} points in ${monthName}`,
       subtext: monthName,
-      timestamp: new Date(`${latestMonthKey}-01T00:00:00Z`).toISOString(),
+      // When the month was actually decided -- its last gameweek going
+      // final. Dating it from the 1st put "August 2026" on screen stamped
+      // Jul 31 for anyone west of UTC, since midnight UTC on the 1st is the
+      // previous evening locally.
+      timestamp: gameweekResultTime(
+        fixtures,
+        Math.max(...monthGws),
+        deadlineByGw.get(Math.max(...monthGws))
+      ),
     },
   ];
 }
@@ -788,14 +841,17 @@ function ranksThroughGameweek(matches: H2HMatchRow[], managerIds: string[], thro
  * recently finished gameweeks. Needs at least two finished gameweeks to
  * have anything to compare. */
 async function getBiggestMoverHeadline(): Promise<NewsHeadline[]> {
-  const [managers, matches, bootstrap] = await Promise.all([loadManagers(), loadAllMatches(), getBootstrap()]);
+  const [managers, matches, bootstrap, fixtures] = await Promise.all([
+    loadManagers(),
+    loadAllMatches(),
+    getBootstrap(),
+    getAllFixtures().catch(() => [] as FplFixture[]),
+  ]);
   const managerIds = managers.map((m) => m.id);
   const byId = new Map(managers.map((m) => [m.id, m]));
   const deadlineByGw = new Map(bootstrap.events.data.map((e) => [e.id, e.deadline_time]));
 
-  const playedGws = Array.from(
-    new Set(matches.filter((m) => m.score_1 !== null && m.score_2 !== null).map((m) => m.gameweek_id))
-  ).sort((a, b) => a - b);
+  const playedGws = decidedGameweeks(matches, fixtures);
   if (playedGws.length < 2) return [];
 
   const latestGw = playedGws[playedGws.length - 1];
@@ -822,7 +878,7 @@ async function getBiggestMoverHeadline(): Promise<NewsHeadline[]> {
       category: "biggest-mover",
       headline: `Biggest Mover: ${manager.teamName} climbs ${best.delta} spot${best.delta === 1 ? "" : "s"} to ${ordinal(best.newRank)}`,
       subtext: `Gameweek ${latestGw}`,
-      timestamp: deadlineByGw.get(latestGw) ?? new Date().toISOString(),
+      timestamp: gameweekResultTime(fixtures, latestGw, deadlineByGw.get(latestGw)),
     },
   ];
 }
