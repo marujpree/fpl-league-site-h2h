@@ -61,6 +61,12 @@ async function loadManagers(): Promise<Manager[]> {
   return rows.map(toManager);
 }
 
+/** Every h2h match in the season.
+ *
+ * Reads only. Repairing a gameweek whose result was never written happens
+ * on /api/live instead (see lib/finalize.ts for why it can't happen here:
+ * finalizing needs an uncached FPL read, and any uncached fetch inside
+ * these ISR-cached renders aborts them with DYNAMIC_SERVER_USAGE). */
 async function loadAllMatches(): Promise<H2HMatchRow[]> {
   const client = getBrowserClient();
   return getFullSchedule(client);

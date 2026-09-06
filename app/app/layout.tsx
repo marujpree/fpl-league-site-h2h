@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
 import NewsTicker from "@/components/NewsTicker";
+import ResultsSync from "@/components/ResultsSync";
 import TabNav from "@/components/TabNav";
 import { getCurrentGameweek, getRecentNewsHeadlines } from "@/lib/data";
 import "./globals.css";
@@ -69,6 +70,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             </span>
           </div>
         </header>
+        <ResultsSync />
         <NewsTicker headlines={tickerHeadlines} />
         <TabNav />
         <main className="mx-auto w-full max-w-5xl flex-1 px-3 py-4 sm:px-6 sm:py-8">

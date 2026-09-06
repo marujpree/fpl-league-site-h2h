@@ -132,6 +132,20 @@ Whichever you choose, remember which one you picked for step 3.
 
 ## 4. Keep live gameweek scores fresh (the sub-daily polling workaround)
 
+**Read this first — polling is about *freshness*, not about *saving
+results*.** Those used to be the same thing, and it cost a gameweek: final
+scores were written into `h2h_matches` (the permanent record behind
+standings, form and head-to-head records) only by `/api/poll`, so when the
+external pinger below stopped after GW1, GW2 finished and was never saved.
+The standings table just skipped the week and the fixtures page showed it
+unplayed, with nothing anywhere reporting a problem.
+
+Saving no longer depends on this section. `/api/live` — which every visitor's
+browser hits on page load — checks whether any finished gameweek is missing
+from `h2h_matches` and writes it if so, so results get saved as long as
+somebody opens the site. What the polling below still buys you is *live*
+scores ticking over during a gameweek without anyone having a tab open.
+
 **The constraint:** Vercel's free Hobby plan only allows Cron Jobs to run
 once per day at minimum — it flatly does not support the every-60-90-second
 schedule this PRD wants for live gameweek tracking. `app/vercel.json`
@@ -182,12 +196,15 @@ keeps a tab open.
 **Tradeoff of Option B**: zero setup, but data can be stale by up to a day
 if literally nobody visits during a live gameweek, and the very first
 visitor of a gameweek may see slightly stale numbers for a few seconds
-until their own page load triggers a fresh poll.
+until their own page load triggers a fresh poll. Finished gameweeks still
+get saved either way — that's the self-repair described at the top of this
+section, not something the poller does.
 
 For a 10-person league checking scores on Saturday afternoons, Option A
 (cron-job.org) is worth the 5 minutes — it's the standard fix for this
 Vercel Hobby limitation and means nobody has to be the one who "wakes up"
-the data.
+the data. Just don't treat it as load-bearing: if it silently stops, live
+scores go stale until someone loads the site, and nothing is lost.
 
 ---
 

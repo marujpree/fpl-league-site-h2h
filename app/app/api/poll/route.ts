@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getServerClient,
+  getFullSchedule,
   getManagers,
-  getMatchesForGameweek,
-  markGameweekFinished,
   setCurrentGameweek,
   upsertLiveScores,
-  updateMatchResults,
   type ManagerRow,
 } from "@/lib/supabase";
-import { computeManagerScores, type ManagerLiveScore } from "@/lib/live-points";
-import { completedGameweeks, gameweekStatus, resolveDisplayGameweek } from "@/lib/gameweek-state";
+import { computeManagerScores } from "@/lib/live-points";
+import { finalizeGameweeks, pendingFinalization } from "@/lib/finalize";
+import { gameweekStatus, resolveDisplayGameweek } from "@/lib/gameweek-state";
 import type { FplFixture } from "@/lib/fpl-types";
 
 // POST/GET /api/poll
@@ -47,11 +45,6 @@ import type { FplFixture } from "@/lib/fpl-types";
 
 const FPL_DRAFT_API = "https://draft.premierleague.com/api";
 const FPL_FIXTURES_API = "https://fantasy.premierleague.com/api";
-
-/** How far back to look for gameweeks that finished but were never written
- * into h2h_matches. Covers a poller that was down for a couple of weeks
- * without rescanning the whole season on every ping. */
-const BACKFILL_LOOKBACK = 6;
 
 interface GameState {
   current_event: number | null;
@@ -94,25 +87,16 @@ async function pollOnce() {
   const scores = await computeManagerScores(managers, displayGameweek);
   const managersUpdated = await upsertLiveScores(supabase, scores);
 
-  // Promote anything that's actually done. This is the piece that used to
-  // be broken: the old code only finalized `current_event` and only when
-  // `current_event_finished` was true — but FPL advances `current_event`
-  // the moment the last match ends, so `current_event_finished` always
-  // described the *new* week and the week that just finished was never
-  // written. Gameweeks stayed "live" forever and standings stayed 0-0-0.
-  const finalized: number[] = [];
-  const candidates = completedGameweeks(fixtures).filter(
-    (gw) => gw > displayGameweek - BACKFILL_LOOKBACK
-  );
-  for (const gameweek of candidates) {
-    const didFinalize = await finalizeGameweekIfNeeded(
-      supabase,
-      gameweek,
-      managers,
-      gameweek === displayGameweek ? scores : null
-    );
-    if (didFinalize) finalized.push(gameweek);
-  }
+  // Promote anything that's actually done, however long ago. This is a
+  // full-season sweep on purpose: an earlier version only reconsidered the
+  // last six gameweeks, so a longer gap in polling lost that history for
+  // good. /api/live runs the same sweep on ordinary visitor traffic, so the
+  // permanent record no longer depends on this route being pinged at all.
+  const pending = pendingFinalization(await getFullSchedule(supabase), fixtures);
+  const finalized = await finalizeGameweeks(supabase, pending, managers, {
+    gameweek: displayGameweek,
+    scores,
+  });
 
   const status = gameweekStatus(fixtures, displayGameweek);
   return {
@@ -123,45 +107,6 @@ async function pollOnce() {
     matchesRemaining: status.remainingMatches + status.inPlayMatches,
     isComplete: status.isComplete,
   };
-}
-
-/**
- * Writes a completed gameweek's final scores into `h2h_matches` (the
- * permanent record the rest of the site reads from) and flags the gameweek
- * finished. Idempotent: no-ops if this gameweek's matches already have
- * scores, so it's safe to call on every poll.
- *
- * `knownScores` lets the caller reuse the scores it just computed for the
- * current gameweek; a backfilled past gameweek passes null and refetches.
- */
-async function finalizeGameweekIfNeeded(
-  supabase: SupabaseClient,
-  gameweek: number,
-  managers: ManagerRow[],
-  knownScores: ManagerLiveScore[] | null
-): Promise<boolean> {
-  const matches = await getMatchesForGameweek(supabase, gameweek);
-  if (matches.length === 0) return false;
-  const alreadyFinalized = matches.every((m) => m.score_1 !== null && m.score_2 !== null);
-  if (alreadyFinalized) return false;
-
-  const scoreRows = knownScores ?? (await computeManagerScores(managers, gameweek));
-  // Nobody had a locked lineup for this gameweek (e.g. it predates the
-  // league). Don't stamp a table full of 0-0 draws over it.
-  if (scoreRows.length === 0) return false;
-
-  const scoreByManager = new Map(scoreRows.map((r) => [r.manager_id, r.current_points]));
-
-  const updates = matches.map((m) => {
-    const score1 = scoreByManager.get(m.manager_1_id) ?? 0;
-    const score2 = scoreByManager.get(m.manager_2_id) ?? 0;
-    const winner_id = score1 === score2 ? null : score1 > score2 ? m.manager_1_id : m.manager_2_id;
-    return { id: m.id, score_1: score1, score_2: score2, winner_id };
-  });
-
-  await updateMatchResults(supabase, updates);
-  await markGameweekFinished(supabase, gameweek);
-  return true;
 }
 
 function describeError(err: unknown): string {

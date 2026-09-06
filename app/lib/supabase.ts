@@ -121,18 +121,6 @@ export async function getStandings(
   return data as StandingsSnapshotRow[];
 }
 
-export async function getMatchesForGameweek(
-  client: SupabaseClient,
-  gameweekId: number
-): Promise<H2HMatchRow[]> {
-  const { data, error } = await client
-    .from("h2h_matches")
-    .select("*")
-    .eq("gameweek_id", gameweekId);
-  if (error) throw error;
-  return data as H2HMatchRow[];
-}
-
 export async function getFullSchedule(
   client: SupabaseClient
 ): Promise<H2HMatchRow[]> {
