@@ -6,8 +6,6 @@ const CATEGORY_LABEL: Record<NewsCategory, string> = {
   "biggest-blowout": "Biggest Blowout",
   "manager-of-month": "Manager of the Month",
   "biggest-mover": "Biggest Mover",
-  waiver: "Waiver Wire",
-  trade: "Trade",
 };
 
 const CATEGORY_STYLE: Record<NewsCategory, string> = {
@@ -16,8 +14,6 @@ const CATEGORY_STYLE: Record<NewsCategory, string> = {
   "biggest-blowout": "bg-accent/10 text-accent-strong",
   "manager-of-month": "bg-accent/10 text-accent-strong",
   "biggest-mover": "bg-accent/10 text-accent-strong",
-  waiver: "bg-live/10 text-live",
-  trade: "bg-live/10 text-live",
 };
 
 function formatDate(iso: string): string {

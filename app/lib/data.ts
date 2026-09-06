@@ -1043,41 +1043,6 @@ async function getPairedTransactions(): Promise<PairedTransaction[]> {
   return results;
 }
 
-async function getTransactionHeadlines(): Promise<NewsHeadline[]> {
-  const paired = await getPairedTransactions();
-  return paired.map((p) => {
-    if (p.kind === "trade" && p.managerB) {
-      return {
-        id: p.id,
-        category: "trade" as const,
-        headline: pickTemplate(
-          [
-            `${p.managerA.display_name} and ${p.managerB.display_name} strike a deal: ${p.playerOut.web_name} for ${p.playerIn.web_name}`,
-            `Trade alert: ${p.managerA.display_name} sends ${p.playerOut.web_name} to ${p.managerB.display_name} for ${p.playerIn.web_name}`,
-          ],
-          p.id
-        ),
-        subtext: `Gameweek ${p.gameweek}`,
-        timestamp: p.timestamp,
-      };
-    }
-    return {
-      id: p.id,
-      category: "waiver" as const,
-      headline: pickTemplate(
-        [
-          `${p.managerA.display_name} raids the waiver wire, snags ${p.playerIn.web_name} (drops ${p.playerOut.web_name})`,
-          `${p.managerA.display_name} makes a move: ${p.playerIn.web_name} in, ${p.playerOut.web_name} out`,
-          `Waiver wire watch: ${p.managerA.display_name} picks up ${p.playerIn.web_name}`,
-        ],
-        p.id
-      ),
-      subtext: `Gameweek ${p.gameweek}`,
-      timestamp: p.timestamp,
-    };
-  });
-}
-
 export interface RecentTransactionPlayer {
   name: string;
   position: string;
@@ -1129,14 +1094,18 @@ export async function getRecentTransactions(limit = 15): Promise<RecentTransacti
     .slice(0, limit);
 }
 
+/** League news: what happened on the pitch. Squad moves used to be mixed in
+ * here and drowned it -- a gameweek produces four headlines and a waiver
+ * window produces a dozen, so the actual news was always outnumbered by
+ * roster churn. Moves now live on their own tab (getRecentTransactions),
+ * which also keeps the site-wide ticker to things worth interrupting for. */
 export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
-  const [matchday, monthly, mover, transactions] = await Promise.all([
+  const [matchday, monthly, mover] = await Promise.all([
     getMatchdayHeadlines(),
     getMonthlyHeadline(),
     getBiggestMoverHeadline(),
-    getTransactionHeadlines(),
   ]);
-  return [...matchday, ...monthly, ...mover, ...transactions].sort(
+  return [...matchday, ...monthly, ...mover].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 }

@@ -2,31 +2,37 @@ import { clubBadgeUrl } from "@/lib/player-images";
 import type { RecentTransaction, RecentTransactionPlayer } from "@/lib/data";
 
 export default function RecentTransactions({ transactions }: { transactions: RecentTransaction[] }) {
-  if (transactions.length === 0) return null;
+  if (transactions.length === 0) {
+    return (
+      <p className="rounded-xl border border-card-border bg-card p-6 text-center text-sm text-muted">
+        No squad moves yet — waiver claims and trades will show up here.
+      </p>
+    );
+  }
 
-  // Collapsed by default, and a plain <details> so this stays a Server
-  // Component with no JavaScript behind it. Ten near-identical rows of
-  // "X dropped A, added B" used to sit above the generated headlines and
-  // push every one of them below the fold -- reference data outranking the
-  // reason the page exists.
   return (
-    <details className="group rounded-xl border border-card-border bg-card">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-xs font-semibold uppercase tracking-wide text-muted hover:text-foreground">
-        <span>
-          Recent transactions
-          <span className="ml-1.5 font-normal normal-case tracking-normal">
-            ({transactions.length})
-          </span>
-        </span>
-        <span aria-hidden className="transition-transform group-open:rotate-180">
-          &#9662;
-        </span>
-      </summary>
-      <ul className="flex flex-col gap-3 px-4 pb-4">
-        {transactions.map((t) => (
-          <li key={t.id} className="flex items-start justify-between gap-3 text-sm">
-            <span className="min-w-0 flex-1">
-              <span className="font-medium text-foreground">{t.managerLabel}: </span>
+    <ul className="flex flex-col gap-2">
+      {transactions.map((t) => (
+        <li
+          key={t.id}
+          className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 rounded-xl border border-card-border bg-card p-4 text-sm"
+        >
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            {/* Waivers and trades read very differently -- one manager
+                shuffling their own squad versus two agreeing a swap -- and on
+                a tab that's nothing but moves, that's the distinction worth
+                being able to scan for. */}
+            <span className="flex items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                  t.kind === "trade" ? "bg-accent/10 text-accent-strong" : "bg-live/10 text-live"
+                }`}
+              >
+                {t.kind === "trade" ? "Trade" : "Waiver"}
+              </span>
+              <span className="min-w-0 truncate font-medium text-foreground">{t.managerLabel}</span>
+            </span>
+            <span className="leading-relaxed">
               {t.kind === "trade" ? (
                 <>
                   <PlayerChip player={t.playerOut} /> <span className="text-muted">for</span>{" "}
@@ -39,11 +45,11 @@ export default function RecentTransactions({ transactions }: { transactions: Rec
                 </>
               )}
             </span>
-            <span className="shrink-0 text-xs text-muted">GW{t.gameweek}</span>
-          </li>
-        ))}
-      </ul>
-    </details>
+          </span>
+          <span className="shrink-0 text-xs text-muted">GW{t.gameweek}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

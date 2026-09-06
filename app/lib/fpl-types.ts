@@ -321,9 +321,7 @@ export type NewsCategory =
   | "biggest-blowout"
   | "manager-of-week"
   | "manager-of-month"
-  | "biggest-mover"
-  | "waiver"
-  | "trade";
+  | "biggest-mover";
 
 export interface NewsHeadline {
   id: string;

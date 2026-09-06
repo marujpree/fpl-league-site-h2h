@@ -69,24 +69,6 @@ export default async function StatsPage() {
           </ul>
         </div>
       </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Rivalry records</h2>
-        <p className="text-sm text-muted">
-          Head to head history against any opponent lives on each manager&apos;s own page — pick one below.
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {streaks.map(({ manager }) => (
-            <Link
-              key={manager.id}
-              href={`/manager/${manager.id}`}
-              className="rounded-lg border border-card-border bg-card px-3 py-2.5 transition-colors hover:border-accent"
-            >
-              <ManagerBadge manager={manager} variant="dot" />
-            </Link>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
