@@ -8,18 +8,41 @@ import type { FixtureEntry } from "@/lib/fpl-types";
 type FixturesViewProps = {
   fixtures: FixtureEntry[];
   currentGw: number | null;
+  /** Whether `currentGw` has finished playing -- its scores are final and
+   * there is nothing left to watch there. */
+  currentGwFinal: boolean;
   totalGameweeks: number;
 };
 
 type Selection = number | "all";
 
-export default function FixturesView({ fixtures, currentGw, totalGameweeks }: FixturesViewProps) {
-  const [selected, setSelected] = useState<Selection>(currentGw ?? 1);
+/** "live" is the gameweek being played right now -- the only one that earns
+ * a pulsing badge. "final" is that same gameweek once its scores are in. */
+type SectionState = "live" | "final" | "scheduled";
+
+export default function FixturesView({
+  fixtures,
+  currentGw,
+  currentGwFinal,
+  totalGameweeks,
+}: FixturesViewProps) {
+  // Once a gameweek's scores are final, looking at it is looking backwards:
+  // the interesting page is the one being played next. The site as a whole
+  // stays on the finished gameweek until the next deadline (so its results
+  // don't vanish the moment the last whistle goes), but this tab is the
+  // schedule, so it moves on as soon as there's nothing left to play.
+  const nextGw = currentGw === null ? 1 : Math.min(totalGameweeks, currentGw + 1);
+  const openAt = currentGw === null ? 1 : currentGwFinal ? nextGw : currentGw;
+
+  const [selected, setSelected] = useState<Selection>(openAt);
 
   const gwFixtures = useMemo(
     () => (selected === "all" ? [] : fixtures.filter((f) => f.gameweek === selected)),
     [fixtures, selected]
   );
+
+  const sectionState = (gw: number): SectionState =>
+    gw !== currentGw ? "scheduled" : currentGwFinal ? "final" : "live";
 
   const byGw = useMemo(() => {
     const map = new Map<number, FixtureEntry[]>();
@@ -53,7 +76,8 @@ export default function FixturesView({ fixtures, currentGw, totalGameweeks }: Fi
           {Array.from({ length: totalGameweeks }, (_, i) => i + 1).map((gw) => (
             <option key={gw} value={gw}>
               Gameweek {gw}
-              {gw === currentGw ? " (current)" : ""}
+              {gw === currentGw && !currentGwFinal ? " (current)" : ""}
+              {currentGwFinal && gw === nextGw ? " (next)" : ""}
             </option>
           ))}
         </select>
@@ -72,11 +96,11 @@ export default function FixturesView({ fixtures, currentGw, totalGameweeks }: Fi
       {selected === "all" ? (
         <div className="flex flex-col gap-4">
           {Array.from({ length: totalGameweeks }, (_, i) => i + 1).map((gw) => (
-            <GameweekSection key={gw} gw={gw} fixtures={byGw.get(gw) ?? []} isCurrent={gw === currentGw} />
+            <GameweekSection key={gw} gw={gw} fixtures={byGw.get(gw) ?? []} state={sectionState(gw)} />
           ))}
         </div>
       ) : (
-        <GameweekSection gw={selected} fixtures={gwFixtures} isCurrent={selected === currentGw} />
+        <GameweekSection gw={selected} fixtures={gwFixtures} state={sectionState(selected)} />
       )}
     </div>
   );
@@ -85,26 +109,28 @@ export default function FixturesView({ fixtures, currentGw, totalGameweeks }: Fi
 function GameweekSection({
   gw,
   fixtures,
-  isCurrent,
+  state,
 }: {
   gw: number;
   fixtures: FixtureEntry[];
-  isCurrent: boolean;
+  state: SectionState;
 }) {
+  const isLive = state === "live";
   return (
-    <section className={`overflow-hidden rounded-xl border ${isCurrent ? "border-live/50" : "border-card-border"}`}>
+    <section className={`overflow-hidden rounded-xl border ${isLive ? "border-live/50" : "border-card-border"}`}>
       <div
         className={`flex items-center justify-between px-4 py-2.5 text-xs font-semibold uppercase tracking-wide ${
-          isCurrent ? "bg-live/10 text-live" : "bg-background-elevated text-muted"
+          isLive ? "bg-live/10 text-live" : "bg-background-elevated text-muted"
         }`}
       >
         <span>Gameweek {gw}</span>
-        {isCurrent && (
+        {isLive && (
           <span className="inline-flex items-center gap-1.5">
             <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-live" aria-hidden />
             In play
           </span>
         )}
+        {state === "final" && <span>Final</span>}
       </div>
       <ul className="divide-y divide-card-border">
         {fixtures.map((fixture) => (

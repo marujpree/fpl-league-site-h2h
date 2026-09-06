@@ -8,7 +8,7 @@ import type { GameweekStatus } from "@/lib/gameweek-state";
  * to move?" without making anyone go and check the fixture list. */
 export default function GameweekProgress({ status }: { status: GameweekStatus }) {
   // Kickoff times render in UTC until mount, then in the viewer's own
-  // timezone -- same trick as DeadlineCountdown, so the server and client
+  // timezone -- same trick as NextDeadline, so the server and client
   // first render agree and there's no hydration mismatch.
   const [mounted, setMounted] = useState(false);
   useEffect(() => {

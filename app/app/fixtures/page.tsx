@@ -16,7 +16,15 @@ export default async function FixturesPage() {
         </p>
       </div>
 
-      <FixturesView fixtures={fixtures} currentGw={currentGw} totalGameweeks={TOTAL_GAMEWEEKS} />
+      <FixturesView
+        fixtures={fixtures}
+        currentGw={currentGw}
+        // Fixture-derived, not the stored `is_finished` flag: a gameweek is
+        // done when its matches are done, whether or not anything has
+        // written that down yet.
+        currentGwFinal={gameweek?.status.isComplete ?? false}
+        totalGameweeks={TOTAL_GAMEWEEKS}
+      />
     </div>
   );
 }

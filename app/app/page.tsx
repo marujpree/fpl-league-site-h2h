@@ -1,4 +1,4 @@
-import DeadlineCountdown from "@/components/DeadlineCountdown";
+import NextDeadline from "@/components/NextDeadline";
 import GameweekProgress from "@/components/GameweekProgress";
 import StandingsTable from "@/components/StandingsTable";
 import { getCurrentGameweek, getLiveStandings, getUpcomingDeadline } from "@/lib/data";
@@ -12,7 +12,7 @@ export default async function StandingsPage() {
 
   return (
     <div className="flex flex-col gap-3 sm:gap-5">
-      <DeadlineCountdown deadline={upcomingDeadline} />
+      <NextDeadline deadline={upcomingDeadline} />
 
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-extrabold tracking-tight text-foreground sm:text-3xl">
