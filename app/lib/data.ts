@@ -638,10 +638,14 @@ export async function getAllStreaks(): Promise<ManagerStreak[]> {
 }
 
 // ---------------------------------------------------------------------------
-// News — auto-generated headlines: biggest blowout / biggest loss each
-// finished gameweek, a monthly recap once a calendar month of gameweeks has
-// fully completed, and waiver/trade write-ups sourced from FPL's own
-// transaction log.
+// News — auto-generated headlines: each finished gameweek's top scorer,
+// bottom scorer and widest margin, a monthly recap once a calendar month of
+// gameweeks has fully completed, and waiver/trade write-ups sourced from
+// FPL's own transaction log.
+//
+// Superlatives are measured on points scored, not on who beat whom. Getting
+// that wrong is how "Biggest Loser" landed on a manager with the third-best
+// score in the week -- they'd simply been drawn against the top scorer.
 // ---------------------------------------------------------------------------
 
 /** Cheap deterministic pick so the same event always renders the same
@@ -702,44 +706,108 @@ async function getMatchdayHeadlines(): Promise<NewsHeadline[]> {
   if (playedGws.length === 0) return [];
   const latestGw = playedGws[playedGws.length - 1];
 
-  let biggest: { match: H2HMatchRow; margin: number } | null = null;
-  for (const m of matches) {
-    if (m.gameweek_id !== latestGw || m.score_1 === null || m.score_2 === null) continue;
-    const margin = Math.abs(m.score_1 - m.score_2);
-    if (!biggest || margin > biggest.margin) biggest = { match: m, margin };
-  }
-  if (!biggest || biggest.margin === 0) return []; // a tie has no winner/loser to crown
+  const gwMatches = matches.filter(
+    (m) => m.gameweek_id === latestGw && m.score_1 !== null && m.score_2 !== null
+  );
+  if (gwMatches.length === 0) return [];
 
-  const { match, margin } = biggest;
-  const winnerId = match.score_1! > match.score_2! ? match.manager_1_id : match.manager_2_id;
-  const loserId = winnerId === match.manager_1_id ? match.manager_2_id : match.manager_1_id;
-  const winner = byId.get(winnerId);
-  const loser = byId.get(loserId);
-  if (!winner || !loser) return [];
+  // Everyone's score for the week, which is what "best" and "worst" should
+  // actually be measured on.
+  const scores: Array<{ id: string; points: number }> = [];
+  for (const m of gwMatches) {
+    scores.push({ id: m.manager_1_id, points: m.score_1! });
+    scores.push({ id: m.manager_2_id, points: m.score_2! });
+  }
+  // Ties broken by team name so a re-render can't reshuffle who gets crowned.
+  const ordered = [...scores].sort(
+    (a, b) =>
+      b.points - a.points ||
+      (byId.get(a.id)?.teamName ?? a.id).localeCompare(byId.get(b.id)?.teamName ?? b.id)
+  );
+  const top = ordered[0];
+  const bottom = ordered[ordered.length - 1];
 
   const timestamp = gameweekResultTime(fixtures, latestGw, deadlineByGw.get(latestGw));
+  const headlines: NewsHeadline[] = [];
 
-  const winHeadline = pickTemplate(
-    [
-      `${winner.teamName} demolishes ${loser.teamName} by ${margin} points — Manager of the Week`,
-      `${winner.teamName} puts on a clinic, beating ${loser.teamName} by ${margin}`,
-      `Manager of the Week: ${winner.teamName}, after a ${margin}-point beatdown of ${loser.teamName}`,
-    ],
-    `motw-${latestGw}-${winner.id}`
-  );
-  const lossHeadline = pickTemplate(
-    [
-      `${loser.teamName} gets steamrolled by ${winner.teamName}, falling ${margin} points short`,
-      `Ouch — ${loser.teamName} drops a ${margin}-point stinker against ${winner.teamName}`,
-      `Biggest Loser of GW${latestGw}: ${loser.teamName}, beaten by ${margin} points`,
-    ],
-    `loss-${latestGw}-${loser.id}`
-  );
+  // Manager of the Week: the week's highest score. Same definition as
+  // getManagerOfTheWeek() on the Stats page -- it used to be "won by the
+  // biggest margin" here and "scored the most" there, one label meaning two
+  // different things in one app, and the margin version reported the margin
+  // as though it were a score.
+  const best = byId.get(top.id);
+  if (best) {
+    headlines.push({
+      id: `motw-${latestGw}`,
+      category: "manager-of-week",
+      headline: pickTemplate(
+        [
+          `Manager of the Week: ${best.teamName}, ${top.points} points in Gameweek ${latestGw}`,
+          `${best.teamName} tops Gameweek ${latestGw} with ${top.points} points`,
+          `${top.points} points for ${best.teamName} — Manager of the Week`,
+        ],
+        `motw-${latestGw}-${best.id}`
+      ),
+      subtext: `Gameweek ${latestGw}`,
+      timestamp,
+    });
+  }
 
-  return [
-    { id: `motw-${latestGw}`, category: "manager-of-week", headline: winHeadline, subtext: `Gameweek ${latestGw}`, timestamp },
-    { id: `loss-${latestGw}`, category: "biggest-loss", headline: lossHeadline, subtext: `Gameweek ${latestGw}`, timestamp },
-  ];
+  // Biggest Loser: the week's *lowest score*. Previously whoever lost by the
+  // widest margin, which crowned RW in GW3 on 34 points -- third-best in the
+  // league that week -- purely for running into the top scorer.
+  const worst = byId.get(bottom.id);
+  if (worst && bottom.points < top.points) {
+    headlines.push({
+      id: `loss-${latestGw}`,
+      category: "biggest-loss",
+      headline: pickTemplate(
+        [
+          `Biggest Loser of GW${latestGw}: ${worst.teamName}, just ${bottom.points} points`,
+          `Ouch — ${worst.teamName} musters only ${bottom.points} points in Gameweek ${latestGw}`,
+          `${worst.teamName} props up Gameweek ${latestGw} with ${bottom.points} points`,
+        ],
+        `loss-${latestGw}-${worst.id}`
+      ),
+      subtext: `Gameweek ${latestGw}`,
+      timestamp,
+    });
+  }
+
+  // The margin story still deserves telling -- it just needed a label that
+  // says "margin" and a scoreline so the number can't be misread as anyone's
+  // total.
+  let widest: { match: H2HMatchRow; margin: number } | null = null;
+  for (const m of gwMatches) {
+    const margin = Math.abs(m.score_1! - m.score_2!);
+    if (!widest || margin > widest.margin) widest = { match: m, margin };
+  }
+  if (widest && widest.margin > 0) {
+    const { match, margin } = widest;
+    const winnerFirst = match.score_1! > match.score_2!;
+    const winner = byId.get(winnerFirst ? match.manager_1_id : match.manager_2_id);
+    const loser = byId.get(winnerFirst ? match.manager_2_id : match.manager_1_id);
+    const hi = Math.max(match.score_1!, match.score_2!);
+    const lo = Math.min(match.score_1!, match.score_2!);
+    if (winner && loser) {
+      headlines.push({
+        id: `blowout-${latestGw}`,
+        category: "biggest-blowout",
+        headline: pickTemplate(
+          [
+            `Biggest win of Gameweek ${latestGw}: ${winner.teamName} ${hi}-${lo} ${loser.teamName}`,
+            `${winner.teamName} beats ${loser.teamName} ${hi}-${lo} — the week's widest margin`,
+            `${margin}-point margin: ${winner.teamName} ${hi}-${lo} ${loser.teamName}`,
+          ],
+          `blowout-${latestGw}-${winner.id}`
+        ),
+        subtext: `Gameweek ${latestGw}`,
+        timestamp,
+      });
+    }
+  }
+
+  return headlines;
 }
 
 /** Manager of the Month -- only for the most recently *fully completed*
@@ -779,16 +847,24 @@ async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
   }
   if (totals.size === 0) return [];
 
-  let bestId: string | null = null;
-  let bestPoints = -Infinity;
-  for (const [id, points] of totals) {
-    if (points > bestPoints) {
-      bestId = id;
-      bestPoints = points;
-    }
-  }
-  const best = bestId ? byId.get(bestId) : null;
-  if (!best) return [];
+  // Every manager on the month's best total, not just whichever the Map
+  // happened to yield first -- August 2026 was a dead heat between Reyes FC
+  // and Brunodagoat on 107, and the old loop crowned one of them by
+  // insertion order while the headline implied they'd won it outright.
+  const bestPoints = Math.max(...totals.values());
+  const leaders = [...totals.entries()]
+    .filter(([, points]) => points === bestPoints)
+    .map(([id]) => byId.get(id))
+    .filter((m): m is Manager => Boolean(m))
+    .sort((a, b) => a.teamName.localeCompare(b.teamName));
+  if (leaders.length === 0) return [];
+
+  const names =
+    leaders.length === 1
+      ? leaders[0].teamName
+      : `${leaders.slice(0, -1).map((m) => m.teamName).join(", ")} and ${
+          leaders[leaders.length - 1].teamName
+        }`;
 
   const monthName = new Date(`${latestMonthKey}-01T00:00:00Z`).toLocaleString(undefined, {
     month: "long",
@@ -800,7 +876,10 @@ async function getMonthlyHeadline(): Promise<NewsHeadline[]> {
     {
       id: `motm-${latestMonthKey}`,
       category: "manager-of-month",
-      headline: `FPL Manager of the Month: ${best.teamName}, with ${bestPoints} points in ${monthName}`,
+      headline:
+        leaders.length === 1
+          ? `FPL Manager of the Month: ${names}, with ${bestPoints} points in ${monthName}`
+          : `FPL Manager of the Month: ${names} share it on ${bestPoints} points in ${monthName}`,
       subtext: monthName,
       // When the month was actually decided -- its last gameweek going
       // final. Dating it from the 1st put "August 2026" on screen stamped

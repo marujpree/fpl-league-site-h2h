@@ -318,6 +318,7 @@ export const TOTAL_GAMEWEEKS = 38;
 
 export type NewsCategory =
   | "biggest-loss"
+  | "biggest-blowout"
   | "manager-of-week"
   | "manager-of-month"
   | "biggest-mover"
