@@ -1110,14 +1110,58 @@ export async function getNewsHeadlines(): Promise<NewsHeadline[]> {
   );
 }
 
-/** For the site-wide ticker, which only shows recent news -- the full
- * history still lives on the News tab. Filtering happens here (a plain
- * async function) rather than in a component body, since computing "now"
- * during render is impure. */
-export async function getRecentNewsHeadlines(maxAgeMs: number): Promise<NewsHeadline[]> {
-  const headlines = await getNewsHeadlines();
+/** One line in the site-wide ticker, and where clicking it should land. */
+export interface TickerItem {
+  id: string;
+  headline: string;
+  timestamp: string;
+  href: string;
+}
+
+/**
+ * The ticker's feed: league news *and* squad moves.
+ *
+ * These are deliberately separate tabs -- a gameweek makes four headlines
+ * and a waiver window makes a dozen moves, so mixing them on the News page
+ * buried the news. The ticker is the one place they belong together,
+ * because it's showing "what happened lately" rather than making anyone
+ * read a list. Sourcing it from news alone left it empty for about five
+ * days a week: gameweek headlines only live inside the window below, and a
+ * gameweek only ends once.
+ *
+ * Filtering happens here rather than in a component body, since computing
+ * "now" during render is impure.
+ */
+export async function getTickerItems(maxAgeMs: number): Promise<TickerItem[]> {
+  const [headlines, moves] = await Promise.all([
+    getNewsHeadlines(),
+    getRecentTransactions(30),
+  ]);
+
+  const items: TickerItem[] = [
+    ...headlines.map((h) => ({
+      id: h.id,
+      headline: h.headline,
+      timestamp: h.timestamp,
+      href: "/news",
+    })),
+    ...moves.map((t) => ({
+      id: t.id,
+      // Terser than the Trades tab's rows: this scrolls past, so it has to
+      // land in one read.
+      headline:
+        t.kind === "trade"
+          ? `Trade: ${t.managerLabel} — ${t.playerOut.name} for ${t.playerIn.name}`
+          : `${t.managerLabel}: ${t.playerIn.name} in, ${t.playerOut.name} out`,
+      timestamp: t.timestamp,
+      href: "/trades",
+    })),
+  ];
+
   const now = Date.now();
-  return headlines.filter((h) => now - new Date(h.timestamp).getTime() <= maxAgeMs);
+  return items
+    .filter((i) => now - new Date(i.timestamp).getTime() <= maxAgeMs)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
 
 // ---------------------------------------------------------------------------

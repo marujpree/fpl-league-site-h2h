@@ -5,7 +5,7 @@ import Link from "next/link";
 import NewsTicker from "@/components/NewsTicker";
 import ResultsSync from "@/components/ResultsSync";
 import TabNav from "@/components/TabNav";
-import { getCurrentGameweek, getRecentNewsHeadlines } from "@/lib/data";
+import { getCurrentGameweek, getTickerItems } from "@/lib/data";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,9 +35,9 @@ export const viewport: Viewport = {
 const TICKER_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [gameweek, tickerHeadlines] = await Promise.all([
+  const [gameweek, tickerItems] = await Promise.all([
     getCurrentGameweek(),
-    getRecentNewsHeadlines(TICKER_MAX_AGE_MS),
+    getTickerItems(TICKER_MAX_AGE_MS),
   ]);
   return (
     <html
@@ -71,7 +71,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </div>
         </header>
         <ResultsSync />
-        <NewsTicker headlines={tickerHeadlines} />
+        <NewsTicker items={tickerItems} />
         <TabNav />
         <main className="mx-auto w-full max-w-5xl flex-1 px-3 py-4 sm:px-6 sm:py-8">
           {children}
