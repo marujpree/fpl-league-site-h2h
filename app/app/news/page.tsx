@@ -14,8 +14,10 @@ export default async function NewsPage() {
         </p>
       </div>
 
-      <RecentTransactions transactions={transactions} />
+      {/* Headlines first: they're what the page is for. Transactions are
+          reference data and collapse out of the way. */}
       <NewsFeed headlines={headlines} />
+      <RecentTransactions transactions={transactions} />
     </div>
   );
 }

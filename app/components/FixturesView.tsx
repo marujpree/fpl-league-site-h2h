@@ -141,9 +141,36 @@ function GameweekSection({
   );
 }
 
+/** Season-to-date record between these two, as a line you can read without
+ * tapping. It was already computed for every fixture and only revealed on
+ * expand, which left upcoming rows as two names either side of a lot of
+ * whitespace. Null when they've never met, so gameweek 1 doesn't read
+ * "0-0". */
+function headToHeadHint(fixture: FixtureEntry): string | null {
+  const h2h = fixture.headToHead;
+  if (!h2h || h2h.meetings === 0) return null;
+  const { manager1Wins, manager2Wins, draws } = h2h;
+  if (manager1Wins === manager2Wins) {
+    return draws > 0 && manager1Wins === 0 ? "All square" : `Level ${manager1Wins}-${manager2Wins}`;
+  }
+  const leader = manager1Wins > manager2Wins ? fixture.manager1 : fixture.manager2;
+  const high = Math.max(manager1Wins, manager2Wins);
+  const low = Math.min(manager1Wins, manager2Wins);
+  return `${leader.teamName} leads ${high}-${low}`;
+}
+
 function FixtureRow({ fixture }: { fixture: FixtureEntry }) {
   const [expanded, setExpanded] = useState(false);
   const { manager1, manager2, played, score1, score2, isLive, headToHead } = fixture;
+  const hint = headToHeadHint(fixture);
+  // Who actually won, so the result reads at a glance instead of making
+  // everyone compare two identically-weighted numbers.
+  const winner =
+    played && score1 !== undefined && score2 !== undefined && score1 !== score2
+      ? score1 > score2
+        ? 1
+        : 2
+      : 0;
 
   return (
     <li className="bg-card">
@@ -160,18 +187,25 @@ function FixtureRow({ fixture }: { fixture: FixtureEntry }) {
         aria-expanded={expanded}
         className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm transition-colors hover:bg-background-elevated"
       >
-        <ManagerLabel manager={manager1} align="left" />
-        <span className="shrink-0 tabular-nums font-semibold text-foreground">
-          {played ? (
-            <span className="inline-flex items-center gap-1.5">
-              {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-live" aria-hidden />}
-              {score1} <span className="text-muted">&ndash;</span> {score2}
-            </span>
-          ) : (
-            <span className="text-xs font-medium uppercase text-muted">vs</span>
+        <ManagerLabel manager={manager1} align="left" dimmed={winner === 2} />
+        <span className="flex shrink-0 flex-col items-center gap-0.5">
+          <span className="tabular-nums font-semibold text-foreground">
+            {played ? (
+              <span className="inline-flex items-center gap-1.5">
+                {isLive && <span className="pl-pulse-dot h-1.5 w-1.5 rounded-full bg-live" aria-hidden />}
+                <span className={winner === 2 ? "font-normal text-muted" : undefined}>{score1}</span>
+                <span className="text-muted">&ndash;</span>
+                <span className={winner === 1 ? "font-normal text-muted" : undefined}>{score2}</span>
+              </span>
+            ) : (
+              <span className="text-xs font-medium uppercase text-muted">vs</span>
+            )}
+          </span>
+          {!played && hint && (
+            <span className="whitespace-nowrap text-[10px] leading-none text-muted">{hint}</span>
           )}
         </span>
-        <ManagerLabel manager={manager2} align="right" />
+        <ManagerLabel manager={manager2} align="right" dimmed={winner === 1} />
       </div>
 
       {expanded && headToHead && (
@@ -186,9 +220,12 @@ function FixtureRow({ fixture }: { fixture: FixtureEntry }) {
 function ManagerLabel({
   manager,
   align,
+  dimmed = false,
 }: {
   manager: FixtureEntry["manager1"];
   align: "left" | "right";
+  /** The losing side of a finished fixture -- receded, not hidden. */
+  dimmed?: boolean;
 }) {
   return (
     <Link
@@ -196,7 +233,7 @@ function ManagerLabel({
       onClick={(e) => e.stopPropagation()}
       className={`flex min-w-0 flex-1 items-center gap-2 hover:text-accent-strong ${
         align === "right" ? "flex-row-reverse text-right" : "text-left"
-      }`}
+      } ${dimmed ? "text-muted" : ""}`}
     >
       <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: manager.accentColor }} />
       <span className="flex min-w-0 items-baseline gap-1.5 truncate">

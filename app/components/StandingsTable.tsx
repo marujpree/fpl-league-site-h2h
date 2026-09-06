@@ -10,6 +10,16 @@ const RANK_ACCENT: Record<number, string> = {
   3: "#d97706", // bronze
 };
 
+/** The podium stripe is conventional enough not to need a legend sitting
+ * next to the rank number -- but it's carried by colour alone, which reaches
+ * neither a screen reader nor anyone who can't separate the bronze from the
+ * gold. A text equivalent costs nothing. */
+const RANK_TITLE: Record<number, string> = {
+  1: "1st — top of the table",
+  2: "2nd",
+  3: "3rd",
+};
+
 type StandingsTableProps = {
   rows: StandingsRow[];
   liveManagerIds: Set<string>;
@@ -96,7 +106,10 @@ function StandingsTableInner({ rows, liveManagerIds }: StandingsTableProps) {
                 backgroundColor: isLive ? "color-mix(in oklab, var(--live) 8%, transparent)" : undefined,
               }}
             >
-              <td className="px-3 py-3 font-semibold text-muted">{row.rank}</td>
+              <td className="px-3 py-3 font-semibold text-muted" title={RANK_TITLE[row.rank]}>
+                {row.rank}
+                {RANK_TITLE[row.rank] && <span className="sr-only"> {RANK_TITLE[row.rank]}</span>}
+              </td>
               <td className="px-3 py-3">
                 <Link href={`/manager/${row.manager.id}`} className="group flex items-center gap-2.5">
                   <span
@@ -138,7 +151,13 @@ function StandingsCard({ row, isLive }: { row: StandingsRow; isLive: boolean }) 
           backgroundColor: isLive ? "color-mix(in oklab, var(--live) 8%, var(--card))" : undefined,
         }}
       >
-        <span className="w-6 shrink-0 text-center text-sm font-semibold text-muted">{row.rank}</span>
+        <span
+          className="w-6 shrink-0 text-center text-sm font-semibold text-muted"
+          title={RANK_TITLE[row.rank]}
+        >
+          {row.rank}
+          {RANK_TITLE[row.rank] && <span className="sr-only"> {RANK_TITLE[row.rank]}</span>}
+        </span>
         <span
           aria-hidden
           className="h-2.5 w-2.5 shrink-0 rounded-full"
