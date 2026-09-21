@@ -12,9 +12,19 @@
 //
 // So instead of trusting those flags, derive the state from the real
 // Premier League fixture list, which is accurate to the minute: a gameweek
-// is complete once every one of its matches has blown for full time and a
-// short settle window has passed on top (bonus points and stat corrections
-// land inside that window -- until then scores are provisional, PRD §5).
+// is complete once every one of its matches reports `finished` -- the
+// per-fixture flag FPL flips only once bonus points and stat corrections
+// are locked in, as opposed to `finished_provisional` (full time blown, but
+// bonus still provisional -- PRD §5).
+//
+// An earlier version declared a gameweek complete a flat SETTLE_MS after
+// the last kickoff instead of waiting on `finished`. That guessed wrong
+// for GW3-5: bonus/stat corrections sometimes take longer than the 30
+// minutes it assumed, so /api/poll finalized those gameweeks -- writing
+// their scores into h2h_matches for good -- while numbers were still
+// provisional, permanently understating several managers' points. Reading
+// `finished` instead of guessing a duration is what actually fixes that,
+// since it waits on FPL's own confirmation however long that takes.
 
 import type { FplFixture } from "./fpl-types";
 
@@ -23,9 +33,12 @@ import type { FplFixture } from "./fpl-types";
  * fixture has no finish timestamp of its own (the API doesn't give one). */
 export const MATCH_WINDOW_MS = 2 * 60 * 60 * 1000;
 
-/** Grace period after the last whistle before a gameweek reads as
- * "complete" rather than "live" -- roughly how long bonus points take to
- * be confirmed. */
+/** Rough estimate of how long bonus points take to confirm, used only to
+ * show a "final ~HH:MM" estimate in the UI while a gameweek is winding
+ * down. Doesn't gate `isComplete` -- that waits on the real per-fixture
+ * `finished` flag instead, since this is only ever a guess and guessing
+ * wrong here previously froze wrong scores into permanent storage (see the
+ * note above). */
 export const SETTLE_MS = 30 * 60 * 1000;
 
 /** FPL sets every gameweek's lineup deadline exactly 90 minutes before its
@@ -35,8 +48,8 @@ export const SETTLE_MS = 30 * 60 * 1000;
 export const DEADLINE_LEAD_MS = 90 * 60 * 1000;
 
 /** Safety valve: if a fixture is postponed mid-gameweek it may never report
- * `finished_provisional`, which would otherwise leave the gameweek stuck on
- * "live" forever. A day past the last scheduled kickoff, call it done. */
+ * `finished`, which would otherwise leave the gameweek stuck on "live"
+ * forever. A day past the last scheduled kickoff, call it done. */
 const STUCK_BACKSTOP_MS = 24 * 60 * 60 * 1000;
 
 export interface GameweekStatus {
@@ -56,7 +69,8 @@ export interface GameweekStatus {
   completesAt: string | null;
   hasStarted: boolean;
   allMatchesFinished: boolean;
-  /** Every match played and the settle window has elapsed. Scores are final. */
+  /** Every match has bonus points confirmed (FPL's `finished`, not just
+   * `finished_provisional`). Scores are final. */
   isComplete: boolean;
   /** Underway and not yet complete -- the only state that should render a
    * pulsing "Live" badge. */
@@ -84,15 +98,20 @@ export function gameweekStatus(
   let finishedMatches = 0;
   let inPlayMatches = 0;
   let remainingMatches = 0;
+  let bonusConfirmedMatches = 0;
   let firstKickoffMs: number | null = null;
   let lastKickoffMs: number | null = null;
 
   for (const fixture of fixtures) {
-    // `finished_provisional` is the full-time whistle; `finished` waits on
-    // bonus confirmation, which is exactly what SETTLE_MS models.
+    // `finished_provisional` is the full-time whistle, used for the "X of Y
+    // played" progress display; `finished` is FPL's own signal that bonus
+    // points and stat corrections are locked in for that match, which is
+    // what actually decides `isComplete` below.
     if (fixture.finished_provisional || fixture.finished) finishedMatches += 1;
     else if (fixture.started) inPlayMatches += 1;
     else remainingMatches += 1;
+
+    if (fixture.finished) bonusConfirmedMatches += 1;
 
     const ko = kickoffMs(fixture);
     if (ko === null) continue;
@@ -106,14 +125,18 @@ export function gameweekStatus(
     fixtures.some((f) => f.started) ||
     (firstKickoffMs !== null && now >= firstKickoffMs);
 
+  // Purely a display estimate (see SETTLE_MS) -- not what decides
+  // `isComplete`.
   const completesAtMs =
     allMatchesFinished && lastKickoffMs !== null
       ? lastKickoffMs + MATCH_WINDOW_MS + SETTLE_MS
       : null;
 
+  const allBonusConfirmed = totalMatches > 0 && bonusConfirmedMatches === totalMatches;
+
   const isComplete =
     totalMatches > 0 &&
-    ((completesAtMs !== null && now >= completesAtMs) ||
+    (allBonusConfirmed ||
       (lastKickoffMs !== null && now >= lastKickoffMs + STUCK_BACKSTOP_MS));
 
   return {
